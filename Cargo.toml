@@ -5,6 +5,8 @@ members = [
     "crates/flowster-vsdx",
     "crates/flowster-crdt",
     "crates/flowster-render",
+    "crates/flowster-text",
+    "crates/flowster-export",
     "crates/flowster-sync-proto",
     "crates/flowster-wasm",
     "crates/flowster-cli",
@@ -17,6 +19,8 @@ default-members = [
     "crates/flowster-vsdx",
     "crates/flowster-crdt",
     "crates/flowster-render",
+    "crates/flowster-text",
+    "crates/flowster-export",
     "crates/flowster-sync-proto",
     "crates/flowster-wasm",
     "crates/flowster-cli",
@@ -34,6 +38,8 @@ flowster-core = { path = "crates/flowster-core" }
 flowster-vsdx = { path = "crates/flowster-vsdx" }
 flowster-crdt = { path = "crates/flowster-crdt", default-features = false }
 flowster-render = { path = "crates/flowster-render" }
+flowster-text = { path = "crates/flowster-text" }
+flowster-export = { path = "crates/flowster-export" }
 flowster-sync-proto = { path = "crates/flowster-sync-proto" }
 
 anyhow = "1"

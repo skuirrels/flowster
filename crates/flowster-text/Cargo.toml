@@ -1,0 +1,23 @@
+[package]
+name = "flowster-text"
+description = "Text layout for display-list text blocks (SPEC §9), on parley"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["system-fonts"]
+# Enumerate the host's installed fonts (native builds). WASM builds register font bytes instead.
+system-fonts = ["parley/system"]
+
+[dependencies]
+flowster-core.workspace = true
+flowster-render.workspace = true
+parley = { version = "0.12", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+flowster-vsdx.workspace = true
+
+[lints]
+workspace = true

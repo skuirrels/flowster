@@ -11,6 +11,7 @@ use flowster_core::transform::Affine;
 use flowster_core::value::Rgba;
 
 use crate::paint::{Paint, Stop};
+use crate::text_layout::TextLayout;
 use crate::{DisplayList, Item, Paragraph};
 
 /// Output pixels per inch for the SVG's width/height attributes.
@@ -175,7 +176,13 @@ fn paint_attrs(paint: &Paint, id: usize, d: &str, defs: &mut String) -> (String,
     }
 }
 
+/// SVG with text placed by estimated widths (no fonts available).
 pub fn to_svg(dl: &DisplayList) -> String {
+    to_svg_with_layouts(dl, &[])
+}
+
+/// SVG with text from `layouts` (indexed like `dl.items`), as laid out by `flowster-text`.
+pub fn to_svg_with_layouts(dl: &DisplayList, layouts: &[Option<TextLayout>]) -> String {
     let (w, h) = (dl.page.width, dl.page.height);
     let mut out = String::new();
     writeln!(
@@ -247,6 +254,27 @@ pub fn to_svg(dl: &DisplayList) -> String {
                 }
                 .ok();
             }
+            Item::Text { transform, height, .. } if matches!(layouts.get(id), Some(Some(_))) => {
+                let Some(Some(l)) = layouts.get(id) else { continue };
+                let frame = transform.then(Affine::translate(0.0, *height)).then(Affine::scale(1.0, -1.0));
+                writeln!(out, r#"<g transform="{}">"#, matrix(&frame)).ok();
+                for run in &l.runs {
+                    let family = item_font(item, &run.text).unwrap_or_default();
+                    writeln!(
+                        out,
+                        r#"<text x="{:.5}" y="{:.5}" font-family="{}" font-size="{:.5}" fill="{}" textLength="{:.5}" lengthAdjust="spacingAndGlyphs" xml:space="preserve">{}</text>"#,
+                        run.x,
+                        run.baseline,
+                        esc(&family),
+                        run.size,
+                        color(run.color),
+                        run.width,
+                        esc(&run.text)
+                    )
+                    .ok();
+                }
+                writeln!(out, "</g>").ok();
+            }
             Item::Text { transform, width, height, margins, valign, paragraphs, .. } => {
                 let [ml, mr, mt, mb] = *margins;
                 let inner_w = (width - ml - mr).max(0.01);
@@ -310,4 +338,17 @@ pub fn to_svg(dl: &DisplayList) -> String {
     out.push_str(&body);
     writeln!(out, "</g>\n</svg>").ok();
     out
+}
+
+/// The font family of the run in `item` whose text contains `text` (for SVG output).
+fn item_font(item: &Item, text: &str) -> Option<String> {
+    let Item::Text { paragraphs, .. } = item else { return None };
+    let mut first = None;
+    for r in paragraphs.iter().flat_map(|p| p.runs.iter()) {
+        first.get_or_insert_with(|| r.font.clone());
+        if r.text.contains(text.trim()) {
+            return Some(r.font.clone());
+        }
+    }
+    first
 }

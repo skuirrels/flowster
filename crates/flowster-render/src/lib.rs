@@ -11,6 +11,7 @@
 
 pub mod paint;
 pub mod svg;
+pub mod text_layout;
 
 use base64::Engine as _;
 use flowster_core::calc::Calc;

@@ -1,0 +1,23 @@
+[package]
+name = "flowster-export"
+description = "PNG (tiny-skia) and PDF (krilla) export of display lists (SPEC §19.3)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+flowster-core.workspace = true
+flowster-render.workspace = true
+tiny-skia = "0.12"
+krilla = { version = "0.8", default-features = false, features = ["raster-images"] }
+skrifa = "0.44"
+zune-jpeg = "0.5"
+base64 = "0.22"
+
+[dev-dependencies]
+flowster-vsdx.workspace = true
+flowster-text.workspace = true
+
+[lints]
+workspace = true

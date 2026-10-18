@@ -445,7 +445,7 @@ fn nurbs_to(
         knots.push(knot_last);
     }
     knots.truncate(ctrl.len() + degree + 1);
-    Some(sample_nurbs(&ctrl, &weights, &knots, degree, 24 * (ctrl.len() - degree)))
+    Some(sample_nurbs(&ctrl, &weights, &knots, degree, 64 * (ctrl.len() - degree)))
 }
 
 /// Evaluates a rational B-spline at `samples` evenly spaced parameters (de Boor).
