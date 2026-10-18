@@ -1,0 +1,158 @@
+[
+  {
+    "library": "loro",
+    "target": "native",
+    "shapes": 10000,
+    "pages": 4,
+    "plain_model_bytes": 78262610,
+    "build_ms": 1367.2096,
+    "built_heap_bytes": 366441722,
+    "snapshot_bytes": 15229731,
+    "snapshot_export_ms": 529.7040999999999,
+    "load_import_ms": 11.006500000001324,
+    "load_open_ms": 2938.210600000002,
+    "loaded_heap_bytes": 60305559,
+    "loaded_peak_bytes": 62220850,
+    "memory_ratio_vs_plain": 0.7705538954042038,
+    "update_bytes": {
+      "move_one": 194,
+      "move_ten": 944,
+      "resize": 213,
+      "text_insert_char": 85,
+      "text_insert_word": 92,
+      "text_bold": 93,
+      "z_order": 160,
+      "create_shape": 1699,
+      "delete_shape": 196
+    },
+    "apply_move_us": 74.8660000000018,
+    "apply_text_us": 20.173999999969965,
+    "converged": true,
+    "cells": 328000,
+    "extras": [
+      [
+        "shallow_snapshot_bytes",
+        11661061
+      ]
+    ],
+    "notes": []
+  },
+  {
+    "library": "yrs",
+    "target": "native",
+    "shapes": 10000,
+    "pages": 4,
+    "plain_model_bytes": 78262610,
+    "build_ms": 468.9579999999987,
+    "built_heap_bytes": 327080904,
+    "snapshot_bytes": 18714569,
+    "snapshot_export_ms": 92.3314999999966,
+    "load_import_ms": 655.5950999999986,
+    "load_open_ms": 951.0429999999978,
+    "loaded_heap_bytes": 359377960,
+    "loaded_peak_bytes": 374722112,
+    "memory_ratio_vs_plain": 4.591949591254368,
+    "update_bytes": {
+      "move_one": 105,
+      "move_ten": 991,
+      "resize": 155,
+      "text_insert_char": 53,
+      "text_insert_word": 57,
+      "text_bold": 75,
+      "z_order": 62,
+      "create_shape": 1830,
+      "delete_shape": 45
+    },
+    "apply_move_us": 23.02400000004127,
+    "apply_text_us": 22.263999999995576,
+    "converged": true,
+    "cells": 328000,
+    "extras": [
+      [
+        "snapshot_v2_bytes",
+        15595674
+      ]
+    ],
+    "notes": []
+  },
+  {
+    "library": "loro",
+    "target": "wasm32",
+    "shapes": 10000,
+    "pages": 4,
+    "plain_model_bytes": 47591098,
+    "build_ms": 1106.3650000000016,
+    "built_heap_bytes": 324536698,
+    "snapshot_bytes": 15634495,
+    "snapshot_export_ms": 482.9382000000005,
+    "load_import_ms": 9.316800000000512,
+    "load_open_ms": 1892.8462,
+    "loaded_heap_bytes": 56760343,
+    "loaded_peak_bytes": 58541217,
+    "memory_ratio_vs_plain": 1.1926672294890108,
+    "update_bytes": {
+      "move_one": 194,
+      "move_ten": 944,
+      "resize": 213,
+      "text_insert_char": 85,
+      "text_insert_word": 92,
+      "text_bold": 93,
+      "z_order": 160,
+      "create_shape": 1699,
+      "delete_shape": 196
+    },
+    "apply_move_us": 97.72900000003574,
+    "apply_text_us": 53.048000000053435,
+    "converged": true,
+    "cells": 328000,
+    "extras": [
+      [
+        "shallow_snapshot_bytes",
+        11704746
+      ]
+    ],
+    "notes": [
+      "wasm linear memory after run: 611 MiB"
+    ]
+  },
+  {
+    "library": "yrs",
+    "target": "wasm32",
+    "shapes": 10000,
+    "pages": 4,
+    "plain_model_bytes": 47591098,
+    "build_ms": 255.44690000000264,
+    "built_heap_bytes": 238647096,
+    "snapshot_bytes": 18714569,
+    "snapshot_export_ms": 74.42629999999917,
+    "load_import_ms": 422.32860000000073,
+    "load_open_ms": 607.4027999999962,
+    "loaded_heap_bytes": 260171340,
+    "loaded_peak_bytes": 275383736,
+    "memory_ratio_vs_plain": 5.466806838539426,
+    "update_bytes": {
+      "move_one": 105,
+      "move_ten": 991,
+      "resize": 155,
+      "text_insert_char": 53,
+      "text_insert_word": 57,
+      "text_bold": 75,
+      "z_order": 62,
+      "create_shape": 1830,
+      "delete_shape": 45
+    },
+    "apply_move_us": 20.648000000001048,
+    "apply_text_us": 15.469000000011874,
+    "converged": true,
+    "cells": 328000,
+    "extras": [
+      [
+        "snapshot_v2_bytes",
+        15595674
+      ]
+    ],
+    "notes": [
+      "wasm linear memory after run: 687 MiB"
+    ]
+  }
+]

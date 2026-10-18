@@ -1,0 +1,89 @@
+//! Flowster desktop host (SPEC §5.1, §21).
+//!
+//! The live document runs in the WebView's Engine Worker. The host only
+//! provides OS services, and each one is a permission-gated command (see
+//! `build.rs` and `capabilities/main.json`). M0 has exactly one service:
+//! opening a file the user picks.
+//!
+//! The webview never names a path. `pick_document` shows the native dialog on
+//! the host side and returns a one-time token; `read_picked_document` returns
+//! that file's bytes as a raw binary IPC payload (no base64, §21) and forgets
+//! the token. A compromised page can therefore read only files the user just picked.
+
+#![forbid(unsafe_code)]
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use serde::Serialize;
+use tauri::ipc::Response;
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_dialog::DialogExt;
+
+/// Matches the engine's own cap on a package (flowster_vsdx::Limits).
+const MAX_DOCUMENT_BYTES: u64 = 2 << 30;
+
+const DOCUMENT_EXTENSIONS: &[&str] = &["vsdx", "vssx", "vstx", "vsdm", "vssm", "vstm", "vsd", "vss", "vst"];
+
+#[derive(Default)]
+struct PickedFiles {
+    next: AtomicU64,
+    paths: Mutex<HashMap<u64, PathBuf>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PickedDocument {
+    token: u64,
+    file_name: String,
+}
+
+#[tauri::command]
+async fn pick_document(app: AppHandle, picked: State<'_, PickedFiles>) -> Result<Option<PickedDocument>, String> {
+    let dialog = app.dialog().clone();
+    let choice = tauri::async_runtime::spawn_blocking(move || {
+        dialog.file().set_title("Open").add_filter("Visio documents", DOCUMENT_EXTENSIONS).blocking_pick_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let Some(choice) = choice else { return Ok(None) };
+    let path = choice.into_path().map_err(|e| e.to_string())?;
+    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let token = picked.next.fetch_add(1, Ordering::Relaxed) + 1;
+    picked.paths.lock().map_err(|e| e.to_string())?.insert(token, path);
+    Ok(Some(PickedDocument { token, file_name }))
+}
+
+#[tauri::command]
+async fn read_picked_document(token: u64, picked: State<'_, PickedFiles>) -> Result<Response, String> {
+    let path = picked
+        .paths
+        .lock()
+        .map_err(|e| e.to_string())?
+        .remove(&token)
+        .ok_or("unknown or already used document token")?;
+    let len = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
+    if len > MAX_DOCUMENT_BYTES {
+        return Err(format!("{} is larger than {} bytes", path.display(), MAX_DOCUMENT_BYTES));
+    }
+    let bytes = tauri::async_runtime::spawn_blocking(move || std::fs::read(&path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    Ok(Response::new(bytes))
+}
+
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            app.manage(PickedFiles::default());
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![pick_document, read_picked_document])
+        .run(tauri::generate_context!())
+        .expect("error while running Flowster");
+}

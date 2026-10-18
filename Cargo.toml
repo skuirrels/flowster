@@ -1,0 +1,68 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/flowster-core",
+    "crates/flowster-vsdx",
+    "crates/flowster-crdt",
+    "crates/flowster-render",
+    "crates/flowster-sync-proto",
+    "crates/flowster-wasm",
+    "crates/flowster-cli",
+    "src-tauri",
+]
+# `src-tauri` needs a built frontend (`ui/dist`) at compile time, so a plain
+# `cargo test` skips it. CI builds the UI first and runs `cargo test --workspace`.
+default-members = [
+    "crates/flowster-core",
+    "crates/flowster-vsdx",
+    "crates/flowster-crdt",
+    "crates/flowster-render",
+    "crates/flowster-sync-proto",
+    "crates/flowster-wasm",
+    "crates/flowster-cli",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.88"
+license = "UNLICENSED"
+repository = "https://github.com/flowster/flowster"
+
+[workspace.dependencies]
+flowster-core = { path = "crates/flowster-core" }
+flowster-vsdx = { path = "crates/flowster-vsdx" }
+flowster-crdt = { path = "crates/flowster-crdt", default-features = false }
+flowster-render = { path = "crates/flowster-render" }
+flowster-sync-proto = { path = "crates/flowster-sync-proto" }
+
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libm = "0.2.16"
+quick-xml = "0.42"
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+loro = "1.16"
+yrs = "0.28"
+clap = { version = "4.6", features = ["derive"] }
+# wasm-bindgen-cli must match this exactly (see scripts/build-wasm.mjs and CI).
+wasm-bindgen = "=0.2.129"
+js-sys = "0.3.106"
+serde-wasm-bindgen = "0.6.5"
+console_error_panic_hook = "0.1.7"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# The WASM engine is size-sensitive; keep its own profile.
+[profile.wasm-release]
+inherits = "release"
+opt-level = 3
+lto = "fat"
+panic = "abort"

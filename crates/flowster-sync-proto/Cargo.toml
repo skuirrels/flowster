@@ -1,0 +1,13 @@
+[package]
+name = "flowster-sync-proto"
+description = "Binary wire protocol between Flowster clients and the sync server (SPEC §20.8)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

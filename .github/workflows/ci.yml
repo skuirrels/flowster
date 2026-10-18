@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Must match the `wasm-bindgen` pin in Cargo.toml.
+  WASM_BINDGEN_VERSION: 0.2.129
+
+jobs:
+  build-test:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-latest is arm64, so the determinism check covers aarch64 as well as x86_64.
+        os: [windows-latest, macos-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install WebKitGTK and Tauri system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: true
+
+      - name: Install wasm-bindgen-cli ${{ env.WASM_BINDGEN_VERSION }}
+        shell: bash
+        run: |
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
+            cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked
+          fi
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Build WASM engine
+        run: pnpm build:wasm
+
+      # src-tauri embeds ui/dist at compile time, so the frontend builds before any cargo step that includes it.
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Clippy (includes the determinism bans in clippy.toml)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace
+
+      - name: Determinism (native vs WASM vs golden)
+        shell: bash
+        run: node scripts/determinism-check.mjs | tee -a "$GITHUB_STEP_SUMMARY"

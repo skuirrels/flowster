@@ -1,0 +1,21 @@
+{
+  "name": "flowster",
+  "private": true,
+  "packageManager": "pnpm@12.14.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "build:wasm:dev": "node scripts/build-wasm.mjs --dev",
+    "dev": "pnpm --filter flowster-ui dev",
+    "build": "pnpm --filter flowster-ui build",
+    "typecheck": "pnpm --filter flowster-ui typecheck",
+    "determinism": "node scripts/determinism-check.mjs",
+    "spike": "node scripts/crdt-spike.mjs",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.3"
+  }
+}

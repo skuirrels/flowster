@@ -1,0 +1,28 @@
+[package]
+name = "flowster-crdt"
+description = "Model <-> CRDT schema (SPEC §20.3), plus the M0 Loro-vs-yrs spike"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["loro", "yrs"]
+loro = ["dep:loro", "dep:pest"]
+# yrs is kept only as the evaluated fallback (docs/adr/0001-crdt-library.md).
+yrs = ["dep:yrs"]
+
+[dependencies]
+flowster-core.workspace = true
+loro = { workspace = true, optional = true }
+yrs = { workspace = true, optional = true }
+serde.workspace = true
+# pest >= 2.9 pulls in `psm`, which needs clang to build for wasm32. Loro only
+# needs pest for its JSONPath grammar; hold it at 2.8.8 so wasm builds need no C toolchain.
+pest = { version = "=2.8.8", optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

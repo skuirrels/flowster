@@ -1,0 +1,25 @@
+[package]
+name = "flowster-cli"
+description = "Headless Flowster: inspect, convert, export, validate (SPEC §17.3)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "flowster"
+path = "src/main.rs"
+
+[dependencies]
+flowster-core.workspace = true
+flowster-vsdx.workspace = true
+flowster-render.workspace = true
+flowster-crdt = { workspace = true, features = ["loro", "yrs"] }
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# `unsafe` is allowed only in the allocator shim used by `bench crdt`.
+[lints.rust]
+unsafe_code = "deny"

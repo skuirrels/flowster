@@ -1,0 +1,15 @@
+[package]
+name = "flowster-core"
+description = "Document model, ShapeSheet engine and derived-state computation (SPEC §6-§14)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+libm.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

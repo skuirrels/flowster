@@ -1,0 +1,21 @@
+[package]
+name = "flowster-vsdx"
+description = "OPC/VSDX package reader (SPEC §19)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+flowster-core.workspace = true
+zip.workspace = true
+flate2.workspace = true
+quick-xml.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

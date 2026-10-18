@@ -1,0 +1,20 @@
+[package]
+name = "flowster-render"
+description = "Display-list builder shared by the canvas, exports and tests (SPEC §8.5)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+flowster-core.workspace = true
+libm.workspace = true
+serde.workspace = true
+base64 = "0.22"
+
+[dev-dependencies]
+flowster-vsdx.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
