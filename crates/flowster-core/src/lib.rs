@@ -6,8 +6,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod calc;
 pub mod command;
 pub mod determinism;
+pub mod formula;
 pub mod geom;
 pub mod model;
 pub mod protocol;

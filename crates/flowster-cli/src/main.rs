@@ -2,6 +2,7 @@
 //!
 //! * `flowster info <file> [--json]`: parts and relationships of a package;
 //! * `flowster export <file> <out.svg|out.json> [--page N]`: render a page to SVG (or its display list);
+//! * `flowster recalc-check <file> [--json]`: recompute every formula and compare with Visio's cached values;
 //! * `flowster determinism [--json]`: derived-state hash (compared against WASM in CI);
 //! * `flowster bench crdt [--shapes N] [--library loro|yrs|all] [--json]`: the CRDT spike;
 //! * `flowster fixture <out.vsdx>`: writes the minimal test package.
@@ -37,6 +38,15 @@ enum Cmd {
         /// 1-based page number; defaults to the first foreground page.
         #[arg(long)]
         page: Option<usize>,
+    },
+    /// Recompute every formula and compare the results with the values cached in the file.
+    RecalcCheck {
+        file: PathBuf,
+        #[arg(long)]
+        json: bool,
+        /// Mismatches to list (all with --json).
+        #[arg(long, default_value_t = 20)]
+        show: usize,
     },
     /// Print the derived-state determinism hash.
     Determinism {
@@ -93,6 +103,7 @@ fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Info { file, json } => info(&file, json),
         Cmd::Export { file, out, page } => export(&file, &out, page),
+        Cmd::RecalcCheck { file, json, show } => recalc_check(&file, json, show),
         Cmd::Determinism { json } => {
             let r = flowster_core::determinism::default_report();
             if json {
@@ -169,6 +180,30 @@ fn export(file: &PathBuf, out: &PathBuf, page: Option<usize>) -> Result<()> {
         dl.page.name,
         dl.items.len()
     );
+    Ok(())
+}
+
+fn recalc_check(file: &PathBuf, json: bool, show: usize) -> Result<()> {
+    let bytes = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
+    let pkg = flowster_vsdx::OpcPackage::open(bytes).with_context(|| format!("opening {}", file.display()))?;
+    let doc = flowster_vsdx::visio::read_document(&pkg)?;
+    let r = flowster_core::calc::recalc_check(&doc);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&r)?);
+        return Ok(());
+    }
+    let pct = |n: usize| if r.formulas == 0 { 100.0 } else { n as f64 * 100.0 / r.formulas as f64 };
+    println!("{}: {} formulas", file.display(), r.formulas);
+    println!("  matched cached value  {:>6}  ({:.1}%)", r.matched, pct(r.matched));
+    println!("  kept cached value     {:>6}  ({:.1}%)", r.kept_cached, pct(r.kept_cached));
+    println!("  mismatched            {:>6}  ({:.1}%)", r.mismatched.len(), pct(r.mismatched.len()));
+    if !r.unsupported_functions.is_empty() {
+        let list: Vec<String> = r.unsupported_functions.iter().map(|(k, v)| format!("{k}×{v}")).collect();
+        println!("  not yet evaluated: {}", list.join(", "));
+    }
+    for m in r.mismatched.iter().take(show) {
+        println!("  {} shape {} {}: {}  →  {} (cached {})", m.page, m.shape, m.cell, m.formula, m.computed, m.cached);
+    }
     Ok(())
 }
 

@@ -121,6 +121,19 @@ impl MergedSection {
     }
 }
 
+/// `F='Inh'`: the cell explicitly inherits its formula.
+pub fn is_inherit(f: &str) -> bool {
+    f.eq_ignore_ascii_case("Inh")
+}
+
+/// The definition of a single-row cell after inheritance: the formula to
+/// evaluate (following `Inh` down the chain) and the nearest cached value.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CellDef<'d> {
+    pub f: Option<&'d str>,
+    pub v: Option<&'d str>,
+}
+
 /// A shape seen through its inheritance chain.
 pub struct Resolved<'d> {
     doc: &'d Document,
@@ -252,6 +265,31 @@ impl<'d> Resolved<'d> {
         Lookup::Missing
     }
 
+    /// Formula and cached value of a single-row cell, through shapes then styles.
+    pub fn cell_def(&self, cell: &str) -> Option<CellDef<'d>> {
+        let mut def: Option<CellDef<'d>> = None;
+        let styles = category_of(cell).map(|c| self.style_chain(c)).unwrap_or_default();
+        let levels = self.chain.iter().map(|s| &s.sheet).chain(styles.iter().map(|s| &s.sheet));
+        for sheet in levels {
+            let Some(c) = sheet.cells.get(cell) else { continue };
+            let d = def.get_or_insert(CellDef::default());
+            if d.v.is_none() {
+                d.v = c.v.as_deref();
+            }
+            match c.f.as_deref() {
+                Some(f) if is_inherit(f) => continue,
+                Some(f) if f.eq_ignore_ascii_case("No Formula") || f.trim().is_empty() => return def,
+                Some(f) => {
+                    d.f = Some(f);
+                    return def;
+                }
+                // A value with no formula is a constant.
+                None => return def,
+            }
+        }
+        def
+    }
+
     /// Cached value of a single-row cell after inheritance (`None` if missing or themed).
     pub fn v(&self, cell: &str) -> Option<&'d str> {
         match self.lookup(cell) {
@@ -316,7 +354,8 @@ impl<'d> Resolved<'d> {
                         if let Some(v) = &c.v {
                             r.v.insert(k.clone(), v.clone());
                         }
-                        if let Some(f) = &c.f {
+                        // `Inh` means "the formula inherited from below": keep it.
+                        if let Some(f) = c.f.as_ref().filter(|f| !is_inherit(f)) {
                             r.f.insert(k.clone(), f.clone());
                         }
                     }

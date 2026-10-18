@@ -1,0 +1,194 @@
+# Formula conformance cases (SPEC §22.3). One formula per line; '#' starts a comment.
+# Evaluated by Visio in the context shape built by formula-fixtures.ps1.
+# Arithmetic, precedence, units
+1+2*3
+(1+2)*3
+-2^2
+2^-1
+10/4
+7-3-2
+2^3^2
+-(3)
+50%
+200%*2
+1 in+1 cm
+2.54 cm
+1 ft
+72 pt
+6 p
+30 deg
+1 rad
+90 deg+0.5
+1E-05*2
+# Comparison and logic
+1<2
+2<1
+1=1
+1<>1
+2>=2
+"abc"="ABC"
+"abc"<"abd"
+TRUE
+FALSE
+TRUE+1
+NOT(0)
+NOT(5)
+AND(1,0)
+AND(1,2)
+OR(0,0)
+OR(0,3)
+IF(1,10,20)
+IF(0,10,20)
+IF(2>1,"yes","no")
+IF(0,10)
+# References
+Width
+Height*2
+Width*Height
+PinX+PinY
+LocPinX
+Angle
+Prop.Cost*2
+Prop.Name
+Prop.Name&" rocks"
+User.Base*3
+Sheet.2!Width
+Sheet.2!Width-Width
+Scratch.X1+Scratch.Y1
+Geometry1.X3
+Char.Size
+# Numeric functions
+ABS(-3.5)
+SQRT(16)
+SQRT(-1)
+1/0
+MAX(1,5,3)
+MIN(4,-2,7)
+SUM(1,2,3.5)
+INT(3.7)
+INT(-3.7)
+ROUND(3.14159,2)
+ROUND(-2.5,0)
+ROUND(1234.5,-2)
+CEILING(2.1)
+CEILING(-2.1)
+CEILING(7,3)
+FLOOR(2.9)
+FLOOR(-2.1)
+FLOOR(7,3)
+TRUNC(-2.7)
+INTUP(2.1)
+INTUP(-2.1)
+SIGN(-4)
+SIGN(0)
+SIGN(9)
+MODULUS(7,3)
+MODULUS(-7,3)
+MODULUS(7,-3)
+POW(2,10)
+LN(10)
+LOG10(1000)
+EXP(1)
+PI()
+BITAND(12,10)
+BITOR(12,10)
+BITXOR(12,10)
+BITNOT(0)
+# Trigonometry
+SIN(30 deg)
+COS(60 deg)
+TAN(45 deg)
+ATAN(1)
+ATAN2(1,1)
+ATAN2(1,-1)
+ANG360(-90 deg)
+ANG360(450 deg)
+ACOS(0.5)
+ASIN(0.5)
+DEG(PI())
+RAD(180)
+COSH(1)
+SINH(1)
+TANH(0.5)
+# Strings
+"a"&"b"
+"x"&1
+1&2
+LEN("hello")
+LEN("")
+FIND("l","hello")
+FIND("z","hello")
+FIND("L","hello")
+STRSAME("Abc","abc")
+STRSAME("Abc","abc",1)
+CHAR(65)
+LEFT("hello",2)
+RIGHT("hello",3)
+MID("hello",2,3)
+UPPER("abc")
+LOWER("ABC")
+TRIM("  a  b  ")
+SUBSTITUTE("aXbX","X","-")
+REPLACE("hello",1,1,"J")
+REPT("ab",3)
+INDEX(1,"a;b;c")
+INDEX(5,"a;b;c")
+INDEX(0,"a,b,c",",")
+LOOKUP("b","a;b;c")
+LOOKUP("z","a;b;c")
+# Errors
+ISERROR(1/0)
+ISERROR(1)
+ISERR(1/0)
+IFERROR(1/0,7)
+IFERROR(5,7)
+NA()
+ISERRNA(NA())
+# Points
+PNTX(PNT(3,4))
+PNTY(PNT(3,4))
+# Colours
+RGB(255,0,0)
+RGB(18,52,86)
+HSL(0,240,120)
+HSL(160,240,120)
+RED(RGB(18,52,86))
+GREEN(RGB(18,52,86))
+BLUE(RGB(18,52,86))
+HUE(RGB(255,0,0))
+HUE(RGB(0,0,255))
+SAT(RGB(255,0,0))
+SAT(RGB(128,128,128))
+LUM(RGB(255,255,255))
+LUM(RGB(255,0,0))
+LUM(RGB(18,52,86))
+TINT(RGB(18,52,86),50)
+SHADE(RGB(18,52,86),50)
+TONE(RGB(18,52,86),50)
+LUMDIFF(RGB(255,255,255),RGB(0,0,0))
+# Guards and pass-throughs
+GUARD(5)
+GUARD(Width*2)
+DEPENDSON(Width)+1
+# Coercion and string comparison
+"abc"="xyz"
+"10"<"9"
+"1"+2
+"abc"+1
+"2"*"3"
+""+1
+"b">"a"
+IF("",1,2)
+IF("x",1,2)
+1=1.0000000001
+0.1+0.2=0.3
+# Colour modifiers, more data points
+SHADE(RGB(18,52,86),20)
+SHADE(RGB(200,100,50),30)
+SHADE(RGB(200,100,50),100)
+TINT(RGB(200,100,50),30)
+TINT(RGB(200,100,50),-30)
+TONE(RGB(200,100,50),30)
+TONE(RGB(200,100,50),-30)
+HSL(40,120,60)
+LUMDIFF(RGB(200,100,50),RGB(18,52,86))

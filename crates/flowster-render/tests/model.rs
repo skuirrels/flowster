@@ -228,3 +228,50 @@ fn text_runs_and_paragraphs() {
     assert_eq!((r[1].text.as_str(), r[1].size), (" big", 0.25));
     assert_eq!(paragraphs[1].runs[0].text, "Second line");
 }
+
+#[test]
+fn formulas_without_cached_values_are_computed() {
+    // Written by a generator that stores formulas only: no V anywhere in the geometry.
+    let fcell = |f: &str| Cell { v: None, f: Some(f.into()), u: None };
+    let row = |t: &str, ix: u32, x: &str, y: &str| Row {
+        t: Some(t.into()),
+        ix: Some(ix),
+        cells: [("X".to_string(), fcell(x)), ("Y".to_string(), fcell(y))].into(),
+        ..Default::default()
+    };
+    let shape = Shape {
+        id: 1,
+        sheet: Sheet {
+            cells: [
+                ("PinX".to_string(), fcell("1 in+1 in")),
+                ("PinY".to_string(), Cell::value("2")),
+                ("Width".to_string(), fcell("2*1.5")),
+                ("Height".to_string(), Cell::value("1")),
+                ("LocPinX".to_string(), fcell("Width*0.5")),
+                ("LocPinY".to_string(), fcell("Height*0.5")),
+            ]
+            .into(),
+            sections: vec![Section {
+                n: "Geometry".into(),
+                ix: Some(0),
+                rows: vec![
+                    row("MoveTo", 1, "Width*0", "Height*0"),
+                    row("LineTo", 2, "Width*1", "Height*0"),
+                    row("LineTo", 3, "Width*1", "Height*1"),
+                    row("LineTo", 4, "Geometry1.X1", "Geometry1.Y1"),
+                ],
+                ..Default::default()
+            }],
+        },
+        ..Default::default()
+    };
+    let doc = Document { pages: vec![page(0, vec![shape])], ..Default::default() };
+    let dl = build_page(&doc, 0).unwrap();
+    let (d, fill, _) = first_path(&dl.items);
+    // Width 3 centred on PinX 2: x from 0.5 to 3.5; the last row refers back to row 1.
+    assert_eq!(d[0], Seg::M { x: 0.5, y: 1.5 });
+    assert_eq!(d[1], Seg::L { x: 3.5, y: 1.5 });
+    assert_eq!(d[2], Seg::L { x: 3.5, y: 2.5 });
+    assert_eq!(d[3], Seg::L { x: 0.5, y: 1.5 });
+    assert!(fill.is_some(), "closed triangle is filled");
+}

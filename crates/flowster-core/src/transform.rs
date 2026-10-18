@@ -43,6 +43,17 @@ impl Affine {
     }
 
     /// Length scale along a direction-agnostic average (for line widths).
+    /// The inverse transform, if the matrix is invertible.
+    pub fn invert(&self) -> Option<Affine> {
+        let [a, b, c, d, e, f] = self.0;
+        let det = a * d - b * c;
+        if det.abs() < 1e-15 {
+            return None;
+        }
+        let (ia, ib, ic, id) = (d / det, -b / det, -c / det, a / det);
+        Some(Affine([ia, ib, ic, id, -(ia * e + ic * f), -(ib * e + id * f)]))
+    }
+
     pub fn mean_scale(&self) -> f64 {
         let [a, b, c, d, _, _] = self.0;
         let det = (a * d - b * c).abs();

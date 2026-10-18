@@ -12,9 +12,11 @@
 pub mod svg;
 
 use base64::Engine as _;
+use flowster_core::calc::Calc;
+use flowster_core::formula::Value;
 use flowster_core::geom::{Seg, round_corners, sections_to_paths};
 use flowster_core::model::{Document, Master, Page, Shape, ShapeType, TextPiece};
-use flowster_core::resolve::{Lookup, Resolved};
+use flowster_core::resolve::{Lookup, MergedSection, Resolved};
 use flowster_core::theme::{EMU_PER_INCH, FillStyle, FontStyle, LineStyle, Slot, StyleSet, Theme};
 use flowster_core::transform::Affine;
 use flowster_core::value::{Rgba, parse_color, parse_num};
@@ -137,7 +139,8 @@ pub fn pages(doc: &Document) -> Vec<PageInfo> {
 /// Builds the display list of page `index`, its background pages first.
 pub fn build_page(doc: &Document, index: usize) -> Option<DisplayList> {
     let info = page_info(doc, index)?;
-    let mut b = Builder { doc, items: Vec::new(), warnings: Vec::new(), layers: Vec::new(), variation: (0, 0) };
+    let mut b =
+        Builder { doc, items: Vec::new(), warnings: Vec::new(), layers: Vec::new(), variation: (0, 0), calc: None };
     let mut chain: Vec<&Page> = Vec::new();
     let mut next = doc.pages[index].back_page;
     while let Some(id) = next {
@@ -166,6 +169,8 @@ struct Builder<'d> {
     layers: Vec<bool>,
     /// The current page's theme variation (colour, style).
     variation: (usize, usize),
+    /// Formula engine for the current page: computes cells the file has no cached value for.
+    calc: Option<Calc<'d>>,
 }
 
 /// Evaluates `THEMEVAL()` cells for one shape (SPEC §11).
@@ -245,6 +250,7 @@ impl<'d> Builder<'d> {
         // 65534 means "not set" for the variation indices.
         let index = |n: &str| num(n).filter(|v| *v >= 0.0 && *v < 65534.0).unwrap_or(0.0) as usize;
         self.variation = (index("VariationColorIndex"), index("VariationStyleIndex"));
+        self.calc = Some(Calc::for_page(self.doc, page));
         let root = Affine::scale(scale, scale);
         for s in &page.shapes {
             self.shape(s, root, None);
@@ -265,14 +271,15 @@ impl<'d> Builder<'d> {
         if !self.on_visible_layer(&r) {
             return;
         }
-        let w = r.num("Width").unwrap_or(0.0);
-        let h = r.num("Height").unwrap_or(0.0);
+        let cell = |name: &str| self.cell_num(&r, name);
+        let w = cell("Width").unwrap_or(0.0);
+        let h = cell("Height").unwrap_or(0.0);
         let local = Affine::shape_local_to_parent(
-            (r.num("PinX").unwrap_or(0.0), r.num("PinY").unwrap_or(0.0)),
-            (r.num("LocPinX").unwrap_or(w / 2.0), r.num("LocPinY").unwrap_or(h / 2.0)),
-            r.num("Angle").unwrap_or(0.0),
-            r.flag("FlipX").unwrap_or(false),
-            r.flag("FlipY").unwrap_or(false),
+            (cell("PinX").unwrap_or(0.0), cell("PinY").unwrap_or(0.0)),
+            (cell("LocPinX").unwrap_or(w / 2.0), cell("LocPinY").unwrap_or(h / 2.0)),
+            cell("Angle").unwrap_or(0.0),
+            cell("FlipX").is_some_and(|v| v != 0.0),
+            cell("FlipY").is_some_and(|v| v != 0.0),
         );
         let world = parent.then(local);
 
@@ -285,6 +292,45 @@ impl<'d> Builder<'d> {
             self.shape(child, world, master);
         }
         self.text(&r, world, w, h);
+    }
+
+    /// The page's calculator, if it knows this exact shape.
+    fn calc_for(&self, r: &Resolved<'_>) -> Option<&Calc<'d>> {
+        self.calc.as_ref().filter(|c| c.owns(r.shape().id, r.shape()))
+    }
+
+    /// A numeric single-row cell: the cached value, else computed from its formula.
+    fn cell_num(&self, r: &Resolved<'_>, name: &str) -> Option<f64> {
+        if let Some(n) = r.num(name) {
+            return Some(n);
+        }
+        let def = r.cell_def(name)?;
+        let f = def.f?;
+        match self.calc_for(r)?.eval_in(r.shape().id, f) {
+            Value::Num(n) => Some(n),
+            Value::Bool(b) => Some(if b { 1.0 } else { 0.0 }),
+            _ => None,
+        }
+    }
+
+    /// Fills geometry cells that have a formula but no cached value.
+    fn compute_missing(&self, r: &Resolved<'_>, sections: &mut [MergedSection]) {
+        let Some(calc) = self.calc_for(r) else { return };
+        for sec in sections {
+            for row in &mut sec.rows {
+                let missing: Vec<(String, String)> = row
+                    .f
+                    .iter()
+                    .filter(|(k, _)| !row.v.contains_key(*k))
+                    .map(|(k, f)| (k.clone(), f.clone()))
+                    .collect();
+                for (k, f) in missing {
+                    if let Value::Num(n) = calc.eval_in(r.shape().id, &f) {
+                        row.v.insert(k, n.to_string());
+                    }
+                }
+            }
+        }
     }
 
     fn themer(&self, r: &Resolved<'_>) -> Option<Themer<'d>> {
@@ -318,10 +364,11 @@ impl<'d> Builder<'d> {
     }
 
     fn geometry(&mut self, r: &Resolved<'_>, world: Affine, w: f64, h: f64) {
-        let sections = r.sections("Geometry");
+        let mut sections = r.sections("Geometry");
         if sections.is_empty() {
             return;
         }
+        self.compute_missing(r, &mut sections);
         let paths = sections_to_paths(&sections, w, h);
         let rounding =
             self.num(r, "Rounding", |t| t.line(r).and_then(|l| l.rounding_emu).map(|e| e / EMU_PER_INCH), 0.0);

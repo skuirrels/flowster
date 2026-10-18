@@ -1,0 +1,1098 @@
+{
+  "generator": "tools/visio-oracle/formula-fixtures.ps1",
+  "visio": "16.0 build 20430",
+  "context": {
+    "Width": 2.0,
+    "Height": 1.0,
+    "PinX": 2.0,
+    "PinY": 1.5,
+    "LocPinX": 1.0,
+    "LocPinY": 0.5,
+    "Angle": 0.5235987755983,
+    "Prop.Cost": 12.5,
+    "User.Base": 4.0,
+    "Scratch.X1": 1.25,
+    "Scratch.Y1": 0.5,
+    "Geometry1.X3": 2.0,
+    "Geometry1.Y3": 1.0,
+    "Char.Size": 0.19444444444444442,
+    "Prop.Name": "Widget",
+    "Sheet.2!Width": 3.0
+  },
+  "cases": [
+    {
+      "formula": "1+2*3",
+      "value": 7.0,
+      "str": "7.0000",
+      "error": 0
+    },
+    {
+      "formula": "(1+2)*3",
+      "value": 9.0,
+      "str": "9.0000",
+      "error": 0
+    },
+    {
+      "formula": "-2^2",
+      "value": 4.0,
+      "str": "4.0000",
+      "error": 0
+    },
+    {
+      "formula": "2^-1",
+      "value": 0.5,
+      "str": "0.5000",
+      "error": 0
+    },
+    {
+      "formula": "10/4",
+      "value": 2.5,
+      "str": "2.5000",
+      "error": 0
+    },
+    {
+      "formula": "7-3-2",
+      "value": 2.0,
+      "str": "2.0000",
+      "error": 0
+    },
+    {
+      "formula": "2^3^2",
+      "value": 64.0,
+      "str": "64.0000",
+      "error": 0
+    },
+    {
+      "formula": "-(3)",
+      "value": -3.0,
+      "str": "-3.0000",
+      "error": 0
+    },
+    {
+      "formula": "50%",
+      "value": 0.5,
+      "str": "50.0000%",
+      "error": 0
+    },
+    {
+      "formula": "200%*2",
+      "value": 4.0,
+      "str": "400.0000%",
+      "error": 0
+    },
+    {
+      "formula": "1 in+1 cm",
+      "value": 1.3937007874015748,
+      "str": "1.3937 in",
+      "error": 0
+    },
+    {
+      "formula": "2.54 cm",
+      "value": 0.9999999999999999,
+      "str": "2.5400 cm",
+      "error": 0
+    },
+    {
+      "formula": "1 ft",
+      "value": 12.0,
+      "str": "1.0000 ft",
+      "error": 0
+    },
+    {
+      "formula": "72 pt",
+      "value": 1.0,
+      "str": "72.0000 pt",
+      "error": 0
+    },
+    {
+      "formula": "6 p",
+      "value": 1.0,
+      "str": "6.0000 p",
+      "error": 0
+    },
+    {
+      "formula": "30 deg",
+      "value": 0.5235987755983,
+      "str": "30.0000 deg",
+      "error": 0
+    },
+    {
+      "formula": "1 rad",
+      "value": 1.0,
+      "str": "1.0000 rad",
+      "error": 0
+    },
+    {
+      "formula": "90 deg+0.5",
+      "value": 2.0707963267949,
+      "str": "118.6479 deg",
+      "error": 0
+    },
+    {
+      "formula": "1E-05*2",
+      "value": 2E-05,
+      "str": "0",
+      "error": 0
+    },
+    {
+      "formula": "1<2",
+      "value": 1.0,
+      "str": "TRUE",
+      "error": 0
+    },
+    {
+      "formula": "2<1",
+      "value": 0.0,
+      "str": "FALSE",
+      "error": 0
+    },
+    {
+      "formula": "1=1",
+      "value": 1.0,
+      "str": "TRUE",
+      "error": 0
+    },
+    {
+      "formula": "1<>1",
+      "value": 0.0,
+      "str": "FALSE",
+      "error": 0
+    },
+    {
+      "formula": "2>=2",
+      "value": 1.0,
+      "str": "TRUE",
+      "error": 0
+    },
+    {
+      "formula": "\"abc\"=\"ABC\"",
+      "value": 1.0,
+      "str": "TRUE",
+      "error": 0
+    },
+    {
+      "formula": "\"abc\"<\"abd\"",
+      "value": 0.0,
+      "str": "FALSE",
+      "error": 0
+    },
+    {
+      "formula": "TRUE",
+      "value": 1.0,
+      "str": "TRUE",
+      "error": 0
+    },
+    {
+      "formula": "FALSE",
+      "value": 0.0,
+      "str": "FALSE",
+      "error": 0
+    },
+    {
+      "formula": "TRUE+1",
+      "value": 2.0,
+      "str": "2.0000",
+      "error": 0
+    },
+    {
+      "formula": "NOT(0)",
+      "value": 1.0,
+      "str": "TRUE",
+      "error": 0
+    },
+    {
+      "formula": "NOT(5)",
+      "value": 0.0,
+      "str": "FALSE",
+      "error": 0
+    },
+    {
+      "formula": "AND(1,0)",
+      "value": 0.0,
+      "str": "FALSE",
+      "error": 0
+    },
+    {
+      "formula": "AND(1,2)",
+      "value": 1.0,
+      "str": "TRUE",
+      "error": 0
+    },
+    {
+      "formula": "OR(0,0)",
+      "value": 0.0,
+      "str": "FALSE",
+      "error": 0
+    },
+    {
+      "formula": "OR(0,3)",
+      "value": 1.0,
+      "str": "TRUE",
+      "error": 0
+    },
+    {
+      "formula": "IF(1,10,20)",
+      "value": 10.0,
+      "str": "10.0000",
+      "error": 0
+    },
+    {
+      "formula": "IF(0,10,20)",
+      "value": 20.0,
+      "str": "20.0000",
+      "error": 0
+    },
+    {
+      "formula": "IF(2>1,\"yes\",\"no\")",
+      "value": 0.0,
+      "str": "yes",
+      "error": 0
+    },
+    {
+      "formula": "IF(0,10)",
+      "parseError": "\n\nError in formula."
+    },
+    {
+      "formula": "Width",
+      "value": 2.0,
+      "str": "50.8000 mm",
+      "error": 0
+    },
+    {
+      "formula": "Height*2",
+      "value": 2.0,
+      "str": "50.8000 mm",
+      "error": 0
+    },
+    {
+      "formula": "Width*Height",
+      "value": 2.0,
+      "str": "1290.3200 mm^2",
+      "error": 0
+    },
+    {
+      "formula": "PinX+PinY",
+      "value": 3.5,
+      "str": "88.9000 mm",
+      "error": 0
+    },
+    {
+      "formula": "LocPinX",
+      "value": 1.0,
+      "str": "25.4000 mm",
+      "error": 0
+    },
+    {
+      "formula": "Angle",
+      "value": 0.5235987755983,
+      "str": "30.0000 deg",
+      "error": 0
+    },
+    {
+      "formula": "Prop.Cost*2",
+      "value": 25.0,
+      "str": "25.0000",
+      "error": 0
+    },
+    {
+      "formula": "Prop.Name",
+      "value": 0.0,
+      "str": "Widget",
+      "error": 0
+    },
+    {
+      "formula": "Prop.Name&\" rocks\"",
+      "value": 0.0,
+      "str": "Widget rocks",
+      "error": 0
+    },
+    {
+      "formula": "User.Base*3",
+      "value": 12.0,
+      "str": "12.0000",
+      "error": 0
+    },
+    {
+      "formula": "Sheet.2!Width",
+      "value": 3.0,
+      "str": "76.2000 mm",
+      "error": 0
+    },
+    {
+      "formula": "Sheet.2!Width-Width",
+      "value": 1.0,
+      "str": "25.4000 mm",
+      "error": 0
+    },
+    {
+      "formula": "Scratch.X1+Scratch.Y1",
+      "value": 1.75,
+      "str": "44.4500 mm",
+      "error": 0
+    },
+    {
+      "formula": "Geometry1.X3",
+      "value": 2.0,
+      "str": "50.8000 mm",
+      "error": 0
+    },
+    {
+      "formula": "Char.Size",
+      "value": 0.19444444444444442,
+      "str": "14.0000 pt",
+      "error": 0
+    },
+    {
+      "formula": "ABS(-3.5)",
+      "value": 3.5,
+      "str": "3.5000",
+      "error": 0
+    },
+    {
+      "formula": "SQRT(16)",
+      "value": 4.0,
+      "str": "4.0000",
+      "error": 0
+    },
+    {
+      "formula": "SQRT(-1)",
+      "value": 4.0,
+      "str": "#NUM!",
+      "error": 68
+    },
+    {
+      "formula": "1/0",
+      "value": 4.0,
+      "str": "#DIV/0!",
+      "error": 39
+    },
+    {
+      "formula": "MAX(1,5,3)",
+      "value": 5.0,
+      "str": "5.0000",
+      "error": 0
+    },
+    {
+      "formula": "MIN(4,-2,7)",
+      "value": -2.0,
+      "str": "-2.0000",
+      "error": 0
+    },
+    {
+      "formula": "SUM(1,2,3.5)",
+      "value": 6.5,
+      "str": "6.5000",
+      "error": 0
+    },
+    {
+      "formula": "INT(3.7)",
+      "value": 3.0,
+      "str": "3.0000",
+      "error": 0
+    },
+    {
+      "formula": "INT(-3.7)",
+      "value": -4.0,
+      "str": "-4.0000",
+      "error": 0
+    },
+    {
+      "formula": "ROUND(3.14159,2)",
+      "value": 3.14,
+      "str": "3.1400",
+      "error": 0
+    },
+    {
+      "formula": "ROUND(-2.5,0)",
+      "value": -3.0,
+      "str": "-3.0000",
+      "error": 0
+    },
+    {
+      "formula": "ROUND(1234.5,-2)",
+      "value": 1200.0,
+      "str": "1200.0000",
+      "error": 0
+    },
+    {
+      "formula": "CEILING(2.1)",
+      "value": 3.0,
+      "str": "3.0000",
+      "error": 0
+    },
+    {
+      "formula": "CEILING(-2.1)",
+      "value": -3.0,
+      "str": "-3.0000",
+      "error": 0
+    },
+    {
+      "formula": "CEILING(7,3)",
+      "value": 9.0,
+      "str": "9.0000",
+      "error": 0
+    },
+    {
+      "formula": "FLOOR(2.9)",
+      "value": 2.0,
+      "str": "2.0000",
+      "error": 0
+    },
+    {
+      "formula": "FLOOR(-2.1)",
+      "value": -2.0,
+      "str": "-2.0000",
+      "error": 0
+    },
+    {
+      "formula": "FLOOR(7,3)",
+      "value": 6.0,
+      "str": "6.0000",
+      "error": 0
+    },
+    {
+      "formula": "TRUNC(-2.7)",
+      "parseError": "\n\nError in formula."
+    },
+    {
+      "formula": "INTUP(2.1)",
+      "value": 3.0,
+      "str": "3.0000",
+      "error": 0
+    },
+    {
+      "formula": "INTUP(-2.1)",
+      "value": -2.0,
+      "str": "-2.0000",
+      "error": 0
+    },
+    {
+      "formula": "SIGN(-4)",
+      "value": -1.0,
+      "str": "-1.0000",
+      "error": 0
+    },
+    {
+      "formula": "SIGN(0)",
+      "value": 0.0,
+      "str": "0.0000",
+      "error": 0
+    },
+    {
+      "formula": "SIGN(9)",
+      "value": 1.0,
+      "str": "1.0000",
+      "error": 0
+    },
+    {
+      "formula": "MODULUS(7,3)",
+      "value": 1.0,
+      "str": "1.0000",
+      "error": 0
+    },
+    {
+      "formula": "MODULUS(-7,3)",
+      "value": 2.0,
+      "str": "2.0000",
+      "error": 0
+    },
+    {
+      "formula": "MODULUS(7,-3)",
+      "value": -2.0,
+      "str": "-2.0000",
+      "error": 0
+    },
+    {
+      "formula": "POW(2,10)",
+      "value": 1024.0,
+      "str": "1024.0000",
+      "error": 0
+    },
+    {
+      "formula": "LN(10)",
+      "value": 2.302585092994046,
+      "str": "2.3026",
+      "error": 0
+    },
+    {
+      "formula": "LOG10(1000)",
+      "value": 3.0,
+      "str": "3.0000",
+      "error": 0
+    },
+    {
+      "formula": "EXP(1)",
+      "parseError": "\n\nUnknown function name."
+    },
+    {
+      "formula": "PI()",
+      "value": 3.1415926535898,
+      "str": "3.1416",
+      "error": 0
+    },
+    {
+      "formula": "BITAND(12,10)",
+      "value": 8.0,
+      "str": "8.0000",
+      "error": 0
+    },
+    {
+      "formula": "BITOR(12,10)",
+      "value": 14.0,
+      "str": "14.0000",
+      "error": 0
+    },
+    {
+      "formula": "BITXOR(12,10)",
+      "value": 6.0,
+      "str": "6.0000",
+      "error": 0
+    },
+    {
+      "formula": "BITNOT(0)",
+      "value": 65535.0,
+      "str": "65535.0000",
+      "error": 0
+    },
+    {
+      "formula": "SIN(30 deg)",
+      "value": 0.500000000000001,
+      "str": "0.5000",
+      "error": 0
+    },
+    {
+      "formula": "COS(60 deg)",
+      "value": 0.499999999999998,
+      "str": "0.5000",
+      "error": 0
+    },
+    {
+      "formula": "TAN(45 deg)",
+      "value": 1.0000000000000036,
+      "str": "1.0000",
+      "error": 0
+    },
+    {
+      "formula": "ATAN(1)",
+      "value": 0.7853981633974483,
+      "str": "45.0000 deg",
+      "error": 0
+    },
+    {
+      "formula": "ATAN2(1,1)",
+      "value": 0.7853981633974483,
+      "str": "45.0000 deg",
+      "error": 0
+    },
+    {
+      "formula": "ATAN2(1,-1)",
+      "value": 2.356194490192345,
+      "str": "135.0000 deg",
+      "error": 0
+    },
+    {
+      "formula": "ANG360(-90 deg)",
+      "value": 4.7123889803847,
+      "str": "270.0000 deg",
+      "error": 0
+    },
+    {
+      "formula": "ANG360(450 deg)",
+      "value": 1.5707963267949,
+      "str": "90.0000 deg",
+      "error": 0
+    },
+    {
+      "formula": "ACOS(0.5)",
+      "value": 1.0471975511965979,
+      "str": "60.0000 deg",
+      "error": 0
+    },
+    {
+      "formula": "ASIN(0.5)",
+      "value": 0.5235987755982989,
+      "str": "30.0000 deg",
+      "error": 0
+    },
+    {
+      "formula": "DEG(PI())",
+      "value": 3.1415926535898,
+      "str": "180.0000 deg",
+      "error": 0
+    },
+    {
+      "formula": "RAD(180)",
+      "value": 3.1415926535898,
+      "str": "3.1416 rad",
+      "error": 0
+    },
+    {
+      "formula": "COSH(1)",
+      "value": 1.5430806348152437,
+      "str": "1.5431",
+      "error": 0
+    },
+    {
+      "formula": "SINH(1)",
+      "value": 1.1752011936438014,
+      "str": "1.1752",
+      "error": 0
+    },
+    {
+      "formula": "TANH(0.5)",
+      "value": 0.46211715726000974,
+      "str": "0.4621",
+      "error": 0
+    },
+    {
+      "formula": "\"a\"&\"b\"",
+      "value": 0.0,
+      "str": "ab",
+      "error": 0
+    },
+    {
+      "formula": "\"x\"&1",
+      "value": 0.0,
+      "str": "x1",
+      "error": 0
+    },
+    {
+      "formula": "1&2",
+      "value": 12.0,
+      "str": "12",
+      "error": 0
+    },
+    {
+      "formula": "LEN(\"hello\")",
+      "value": 5.0,
+      "str": "5.0000",
+      "error": 0
+    },
+    {
+      "formula": "LEN(\"\")",
+      "value": 0.0,
+      "str": "0.0000",
+      "error": 0
+    },
+    {
+      "formula": "FIND(\"l\",\"hello\")",
+      "value": 3.0,
+      "str": "3.0000",
+      "error": 0
+    },
+    {
+      "formula": "FIND(\"z\",\"hello\")",
+      "value": 3.0,
+      "str": "#VALUE!",
+      "error": 47
+    },
+    {
+      "formula": "FIND(\"L\",\"hello\")",
+      "value": 3.0,
+      "str": "#VALUE!",
+      "error": 47
+    },
+    {
+      "formula": "STRSAME(\"Abc\",\"abc\")",
+      "value": 0.0,
+      "str": "FALSE",
+      "error": 0
+    },
+    {
+      "formula": "STRSAME(\"Abc\",\"abc\",1)",
+      "value": 1.0,
+      "str": "TRUE",
+      "error": 0
+    },
+    {
+      "formula": "CHAR(65)",
+      "value": 0.0,
+      "str": "A",
+      "error": 0
+    },
+    {
+      "formula": "LEFT(\"hello\",2)",
+      "value": 0.0,
+      "str": "he",
+      "error": 0
+    },
+    {
+      "formula": "RIGHT(\"hello\",3)",
+      "value": 0.0,
+      "str": "llo",
+      "error": 0
+    },
+    {
+      "formula": "MID(\"hello\",2,3)",
+      "value": 0.0,
+      "str": "ell",
+      "error": 0
+    },
+    {
+      "formula": "UPPER(\"abc\")",
+      "value": 0.0,
+      "str": "ABC",
+      "error": 0
+    },
+    {
+      "formula": "LOWER(\"ABC\")",
+      "value": 0.0,
+      "str": "abc",
+      "error": 0
+    },
+    {
+      "formula": "TRIM(\"  a  b  \")",
+      "value": 0.0,
+      "str": "a b",
+      "error": 0
+    },
+    {
+      "formula": "SUBSTITUTE(\"aXbX\",\"X\",\"-\")",
+      "value": 0.0,
+      "str": "a-b-",
+      "error": 0
+    },
+    {
+      "formula": "REPLACE(\"hello\",1,1,\"J\")",
+      "value": 0.0,
+      "str": "Jello",
+      "error": 0
+    },
+    {
+      "formula": "REPT(\"ab\",3)",
+      "value": 0.0,
+      "str": "ababab",
+      "error": 0
+    },
+    {
+      "formula": "INDEX(1,\"a;b;c\")",
+      "value": 0.0,
+      "str": "b",
+      "error": 0
+    },
+    {
+      "formula": "INDEX(5,\"a;b;c\")",
+      "value": 0.0,
+      "str": "",
+      "error": 0
+    },
+    {
+      "formula": "INDEX(0,\"a,b,c\",\",\")",
+      "value": 0.0,
+      "str": "a",
+      "error": 0
+    },
+    {
+      "formula": "LOOKUP(\"b\",\"a;b;c\")",
+      "value": 1.0,
+      "str": "1.0000",
+      "error": 0
+    },
+    {
+      "formula": "LOOKUP(\"z\",\"a;b;c\")",
+      "value": -1.0,
+      "str": "-1.0000",
+      "error": 0
+    },
+    {
+      "formula": "ISERROR(1/0)",
+      "value": 1.0,
+      "str": "TRUE",
+      "error": 0
+    },
+    {
+      "formula": "ISERROR(1)",
+      "value": 0.0,
+      "str": "FALSE",
+      "error": 0
+    },
+    {
+      "formula": "ISERR(1/0)",
+      "value": 1.0,
+      "str": "TRUE",
+      "error": 0
+    },
+    {
+      "formula": "IFERROR(1/0,7)",
+      "value": 7.0,
+      "str": "7.0000",
+      "error": 0
+    },
+    {
+      "formula": "IFERROR(5,7)",
+      "value": 5.0,
+      "str": "5.0000",
+      "error": 0
+    },
+    {
+      "formula": "NA()",
+      "value": 5.0,
+      "str": "#N/A",
+      "error": 74
+    },
+    {
+      "formula": "ISERRNA(NA())",
+      "value": 1.0,
+      "str": "TRUE",
+      "error": 0
+    },
+    {
+      "formula": "PNTX(PNT(3,4))",
+      "value": 3.0,
+      "str": "76.2000 mm",
+      "error": 0
+    },
+    {
+      "formula": "PNTY(PNT(3,4))",
+      "value": 4.0,
+      "str": "101.6000 mm",
+      "error": 0
+    },
+    {
+      "formula": "RGB(255,0,0)",
+      "value": 25.0,
+      "str": "RGB(255, 0, 0)",
+      "error": 0
+    },
+    {
+      "formula": "RGB(18,52,86)",
+      "value": 26.0,
+      "str": "RGB(18, 52, 86)",
+      "error": 0
+    },
+    {
+      "formula": "HSL(0,240,120)",
+      "value": 25.0,
+      "str": "RGB(255, 0, 0)",
+      "error": 0
+    },
+    {
+      "formula": "HSL(160,240,120)",
+      "value": 27.0,
+      "str": "RGB(0, 0, 255)",
+      "error": 0
+    },
+    {
+      "formula": "RED(RGB(18,52,86))",
+      "value": 18.0,
+      "str": "18.0000",
+      "error": 0
+    },
+    {
+      "formula": "GREEN(RGB(18,52,86))",
+      "value": 52.0,
+      "str": "52.0000",
+      "error": 0
+    },
+    {
+      "formula": "BLUE(RGB(18,52,86))",
+      "value": 86.0,
+      "str": "86.0000",
+      "error": 0
+    },
+    {
+      "formula": "HUE(RGB(255,0,0))",
+      "value": 0.0,
+      "str": "0.0000",
+      "error": 0
+    },
+    {
+      "formula": "HUE(RGB(0,0,255))",
+      "value": 160.0,
+      "str": "160.0000",
+      "error": 0
+    },
+    {
+      "formula": "SAT(RGB(255,0,0))",
+      "value": 240.0,
+      "str": "240.0000",
+      "error": 0
+    },
+    {
+      "formula": "SAT(RGB(128,128,128))",
+      "value": 0.0,
+      "str": "0.0000",
+      "error": 0
+    },
+    {
+      "formula": "LUM(RGB(255,255,255))",
+      "value": 240.0,
+      "str": "240.0000",
+      "error": 0
+    },
+    {
+      "formula": "LUM(RGB(255,0,0))",
+      "value": 120.0,
+      "str": "120.0000",
+      "error": 0
+    },
+    {
+      "formula": "LUM(RGB(18,52,86))",
+      "value": 49.0,
+      "str": "49.0000",
+      "error": 0
+    },
+    {
+      "formula": "TINT(RGB(18,52,86),50)",
+      "value": 30.0,
+      "str": "RGB(36, 105, 174)",
+      "error": 0
+    },
+    {
+      "formula": "SHADE(RGB(18,52,86),50)",
+      "value": 31.0,
+      "str": "RGB(10, 27, 44)",
+      "error": 0
+    },
+    {
+      "formula": "TONE(RGB(18,52,86),50)",
+      "value": 32.0,
+      "str": "RGB(29, 52, 75)",
+      "error": 0
+    },
+    {
+      "formula": "LUMDIFF(RGB(255,255,255),RGB(0,0,0))",
+      "value": 240.0,
+      "str": "240.0000",
+      "error": 0
+    },
+    {
+      "formula": "GUARD(5)",
+      "value": 5.0,
+      "str": "5.0000",
+      "error": 0
+    },
+    {
+      "formula": "GUARD(Width*2)",
+      "value": 4.0,
+      "str": "101.6000 mm",
+      "error": 0
+    },
+    {
+      "formula": "DEPENDSON(Width)+1",
+      "value": 1.0,
+      "str": "1.0000",
+      "error": 0
+    },
+    {
+      "formula": "\"abc\"=\"xyz\"",
+      "value": 1.0,
+      "str": "TRUE",
+      "error": 0
+    },
+    {
+      "formula": "\"10\"<\"9\"",
+      "value": 0.0,
+      "str": "FALSE",
+      "error": 0
+    },
+    {
+      "formula": "\"1\"+2",
+      "value": 3.0,
+      "str": "3.0000",
+      "error": 0
+    },
+    {
+      "formula": "\"abc\"+1",
+      "value": 3.0,
+      "str": "#VALUE!",
+      "error": 47
+    },
+    {
+      "formula": "\"2\"*\"3\"",
+      "value": 6.0,
+      "str": "6.0000",
+      "error": 0
+    },
+    {
+      "formula": "\"\"+1",
+      "value": 6.0,
+      "str": "#VALUE!",
+      "error": 47
+    },
+    {
+      "formula": "\"b\">\"a\"",
+      "value": 0.0,
+      "str": "FALSE",
+      "error": 0
+    },
+    {
+      "formula": "IF(\"\",1,2)",
+      "value": 0.0,
+      "str": "#VALUE!",
+      "error": 47
+    },
+    {
+      "formula": "IF(\"x\",1,2)",
+      "value": 0.0,
+      "str": "#VALUE!",
+      "error": 47
+    },
+    {
+      "formula": "1=1.0000000001",
+      "value": 1.0,
+      "str": "TRUE",
+      "error": 0
+    },
+    {
+      "formula": "0.1+0.2=0.3",
+      "value": 1.0,
+      "str": "TRUE",
+      "error": 0
+    },
+    {
+      "formula": "SHADE(RGB(18,52,86),20)",
+      "value": 34.0,
+      "str": "RGB(15, 43, 70)",
+      "error": 0
+    },
+    {
+      "formula": "SHADE(RGB(200,100,50),30)",
+      "value": 36.0,
+      "str": "RGB(150, 73, 37)",
+      "error": 0
+    },
+    {
+      "formula": "SHADE(RGB(200,100,50),100)",
+      "value": 37.0,
+      "str": "RGB(31, 15, 7)",
+      "error": 0
+    },
+    {
+      "formula": "TINT(RGB(200,100,50),30)",
+      "value": 38.0,
+      "str": "RGB(216, 137, 99)",
+      "error": 0
+    },
+    {
+      "formula": "TINT(RGB(200,100,50),-30)",
+      "value": 36.0,
+      "str": "RGB(150, 73, 37)",
+      "error": 0
+    },
+    {
+      "formula": "TONE(RGB(200,100,50),30)",
+      "value": 39.0,
+      "str": "RGB(185, 104, 66)",
+      "error": 0
+    },
+    {
+      "formula": "TONE(RGB(200,100,50),-30)",
+      "value": 40.0,
+      "str": "RGB(217, 94, 34)",
+      "error": 0
+    },
+    {
+      "formula": "HSL(40,120,60)",
+      "value": 41.0,
+      "str": "RGB(96, 96, 32)",
+      "error": 0
+    },
+    {
+      "formula": "LUMDIFF(RGB(200,100,50),RGB(18,52,86))",
+      "value": 69.0,
+      "str": "69.0000",
+      "error": 0
+    }
+  ]
+}
