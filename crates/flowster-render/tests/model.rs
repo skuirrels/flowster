@@ -62,7 +62,9 @@ fn first_path(items: &[Item]) -> (&Vec<Seg>, Option<Rgba>, Option<Rgba>) {
     items
         .iter()
         .find_map(|i| match i {
-            Item::Path { d, fill, stroke, .. } => Some((d, *fill, stroke.as_ref().map(|s| s.color))),
+            Item::Path { d, fill, stroke, .. } => {
+                Some((d, fill.as_ref().map(|f| f.representative()), stroke.as_ref().map(|s| s.color)))
+            }
             _ => None,
         })
         .expect("a path")
@@ -134,13 +136,14 @@ fn themed_cells_use_the_theme_and_fall_back_without_one() {
     let theme = Theme {
         scheme: BTreeMap::from([("accent1".to_string(), Rgba(0x10, 0x80, 0xf0, 255))]),
         shapes: StyleSet {
-            fills: vec![FillStyle { color: Some(ph(vec![])), pattern: None }],
+            fills: vec![FillStyle { color: Some(ph(vec![])), ..Default::default() }],
             lines: vec![LineStyle {
                 width_emu: Some(25_400.0),
                 color: Some(ph(vec![("lumMod".into(), 0.5)])),
                 ..Default::default()
             }],
             fonts: vec![],
+            effects: vec![],
         },
         ..Default::default()
     };
@@ -274,4 +277,61 @@ fn formulas_without_cached_values_are_computed() {
     assert_eq!(d[2], Seg::L { x: 3.5, y: 2.5 });
     assert_eq!(d[3], Seg::L { x: 0.5, y: 1.5 });
     assert!(fill.is_some(), "closed triangle is filled");
+}
+
+#[test]
+fn gradients_patterns_and_shadows() {
+    use flowster_render::Paint;
+    let mut g = box_shape(1, (2.0, 2.0));
+    for (k, v) in [("FillGradientEnabled", "1"), ("FillGradientDir", "3"), ("FillForegnd", "#ff0000")] {
+        g.sheet.cells.insert(k.into(), Cell::value(v));
+    }
+    let stop = |ix: u32, c: &str, p: &str| Row {
+        ix: Some(ix),
+        cells: cells(&[("GradientStopColor", c), ("GradientStopPosition", p), ("GradientStopColorTrans", "0")]),
+        ..Default::default()
+    };
+    g.sheet.sections.push(Section {
+        n: "FillGradient".into(),
+        rows: vec![stop(0, "#ffffff", "0"), stop(1, "#0000ff", "1")],
+        ..Default::default()
+    });
+
+    let mut hatch = box_shape(2, (5.0, 2.0));
+    for (k, v) in [("FillPattern", "2"), ("FillForegnd", "#000000"), ("FillBkgnd", "#ffffff")] {
+        hatch.sheet.cells.insert(k.into(), Cell::value(v));
+    }
+    let mut shadowed = box_shape(3, (8.0, 2.0));
+    for (k, v) in [
+        ("ShdwPattern", "1"),
+        ("ShapeShdwType", "1"),
+        ("ShapeShdwOffsetX", "0.1"),
+        ("ShapeShdwOffsetY", "-0.1"),
+        ("ShdwForegnd", "#000000"),
+        ("ShapeShdwBlur", "0.05"),
+    ] {
+        shadowed.sheet.cells.insert(k.into(), Cell::value(v));
+    }
+    let doc = Document { pages: vec![page(0, vec![g, hatch, shadowed])], ..Default::default() };
+    let dl = build_page(&doc, 0).unwrap();
+    let fills: Vec<(u32, &Paint, f64)> = dl
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Path { shape, fill: Some(f), blur, .. } => Some((*shape, f, *blur)),
+            _ => None,
+        })
+        .collect();
+    // Gradient stops win over FillForegnd; radial from centre in the unit box.
+    assert!(matches!(fills[0], (1, Paint::Radial { cx, cy, .. }, _) if *cx == 0.5 && *cy == 0.5));
+    assert!(matches!(fills[1], (2, Paint::Pattern { .. }, _)));
+    // The shadow is drawn first, offset on the page and blurred, then the shape.
+    let (id, Paint::Solid { color }, blur) = fills[2] else { panic!("{:?}", fills[2]) };
+    assert_eq!((id, color.3, blur), (3, 255, 0.05));
+    let Item::Path { d, .. } =
+        dl.items.iter().find(|i| matches!(i, Item::Path { shape: 3, blur, .. } if *blur > 0.0)).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(d[0], Seg::M { x: 7.1, y: 1.4 });
 }

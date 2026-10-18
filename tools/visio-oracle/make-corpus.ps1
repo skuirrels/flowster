@@ -227,6 +227,141 @@ try {
   Set-Formula $cap "LinePattern" "0"
   Export-Doc $doc "images"
   $doc.Close()
+
+  # ---------------------------------------------------------------- fills.vsdx
+  # Gradient fills, fill patterns and shadows (SPEC §8.3).
+  $doc = $app.Documents.Add("")
+  $page = $doc.Pages.Item(1)
+  Set-Formula $page.PageSheet "PageWidth" "11 in"
+  Set-Formula $page.PageSheet "PageHeight" "8.5 in"
+  $label = {
+    param($shape, $text)
+    $shape.Text = $text
+  }
+
+  # Modern gradients: FillGradientEnabled + stops.
+  $g1 = $page.DrawRectangle(0.5, 6, 3, 7.5)
+  & $label $g1 "Linear 0 deg"
+  Set-Formula $g1 "FillGradientEnabled" "TRUE"
+  Set-Formula $g1 "FillGradientDir" "0"
+  Set-Formula $g1 "FillGradientAngle" "0 deg"
+  Set-Formula $g1 "FillForegnd" "RGB(255,192,0)"
+  $g2 = $page.DrawRectangle(3.5, 6, 6, 7.5)
+  & $label $g2 "Linear 90 deg"
+  Set-Formula $g2 "FillGradientEnabled" "TRUE"
+  Set-Formula $g2 "FillGradientDir" "0"
+  Set-Formula $g2 "FillGradientAngle" "90 deg"
+  Set-Formula $g2 "FillForegnd" "RGB(91,155,213)"
+  $g3 = $page.DrawOval(6.5, 6, 9, 7.5)
+  & $label $g3 "Radial"
+  Set-Formula $g3 "FillGradientEnabled" "TRUE"
+  Set-Formula $g3 "FillGradientDir" "1"
+  Set-Formula $g3 "FillForegnd" "RGB(112,173,71)"
+
+  $stops = {
+    param($shape, $list)
+    for ($k = 0; $k -lt $list.Count; $k++) {
+      $n = $k + 1
+      Set-Formula $shape "FillGradientStops.GradientStopColor[$n]" $list[$k][0]
+      Set-Formula $shape "FillGradientStops.GradientStopPosition[$n]" $list[$k][1]
+      Set-Formula $shape "FillGradientStops.GradientStopColorTrans[$n]" "0%"
+    }
+  }
+  & $stops $g1 @(@("RGB(255,192,0)", "0%"), @("RGB(192,0,0)", "100%"))
+  & $stops $g2 @(@("RGB(91,155,213)", "0%"), @("RGB(255,255,255)", "60%"), @("RGB(31,78,121)", "100%"))
+  & $stops $g3 @(@("RGB(255,255,255)", "0%"), @("RGB(112,173,71)", "100%"))
+
+  # Legacy two-colour fill patterns and gradients (FillPattern 2-40).
+  $patterns = @(2, 5, 10, 16, 25, 31, 36)
+  for ($i = 0; $i -lt $patterns.Count; $i++) {
+    $p = $page.DrawRectangle(0.5 + 1.4 * $i, 3.8, 1.7 + 1.4 * $i, 5.2)
+    & $label $p "P$($patterns[$i])"
+    Set-Formula $p "FillPattern" "$($patterns[$i])"
+    Set-Formula $p "FillForegnd" "RGB(68,114,196)"
+    Set-Formula $p "FillBkgnd" "RGB(255,242,204)"
+  }
+
+  # Shadows.
+  $s1 = $page.DrawRectangle(0.5, 1, 3, 2.5)
+  & $label $s1 "Shadow"
+  Set-Formula $s1 "FillForegnd" "RGB(255,255,255)"
+  Set-Formula $s1 "ShdwPattern" "1"
+  Set-Formula $s1 "ShapeShdwType" "1"
+  Set-Formula $s1 "ShapeShdwOffsetX" "0.1 in"
+  Set-Formula $s1 "ShapeShdwOffsetY" "-0.1 in"
+  Set-Formula $s1 "ShdwForegnd" "RGB(0,0,0)"
+  Set-Formula $s1 "ShdwForegndTrans" "50%"
+  $s2 = $page.DrawOval(3.5, 1, 6, 2.5)
+  & $label $s2 "Blurred shadow"
+  Set-Formula $s2 "FillForegnd" "RGB(237,125,49)"
+  Set-Formula $s2 "ShdwPattern" "1"
+  Set-Formula $s2 "ShapeShdwType" "1"
+  Set-Formula $s2 "ShapeShdwOffsetX" "0.15 in"
+  Set-Formula $s2 "ShapeShdwOffsetY" "-0.15 in"
+  Set-Formula $s2 "ShapeShdwBlur" "8 pt"
+  Set-Formula $s2 "ShdwForegnd" "RGB(80,80,80)"
+  Set-Formula $s2 "ShdwForegndTrans" "30%"
+  Export-Doc $doc "fills"
+  $doc.Close()
+
+  # ------------------------------------------------------------- patterns.vsdx
+  # Every FillGradientDir (row 1) and every legacy FillPattern 2-40, labelled.
+  $doc = $app.Documents.Add("")
+  $page = $doc.Pages.Item(1)
+  Set-Formula $page.PageSheet "PageWidth" "11 in"
+  Set-Formula $page.PageSheet "PageHeight" "8.5 in"
+  for ($d = 0; $d -le 13; $d++) {
+    $x = 0.3 + 0.75 * $d
+    $g = $page.DrawRectangle($x, 7.4, $x + 0.65, 8.1)
+    $g.Text = "D$d"
+    Set-Formula $g "FillGradientEnabled" "TRUE"
+    Set-Formula $g "FillGradientDir" "$d"
+    Set-Formula $g "FillGradientStops.GradientStopColor[1]" "RGB(255,255,255)"
+    Set-Formula $g "FillGradientStops.GradientStopPosition[1]" "0%"
+    Set-Formula $g "FillGradientStops.GradientStopColor[2]" "RGB(0,112,192)"
+    Set-Formula $g "FillGradientStops.GradientStopPosition[2]" "100%"
+  }
+  for ($i = 2; $i -le 40; $i++) {
+    $k = $i - 2
+    $x = 0.3 + 1.05 * ($k % 10)
+    $y = 6.0 - 1.4 * [math]::Floor($k / 10)
+    $p = $page.DrawRectangle($x, $y, $x + 0.9, $y + 1.1)
+    $p.Text = "$i"
+    Set-Formula $p "FillPattern" "$i"
+    Set-Formula $p "FillForegnd" "RGB(0,112,192)"
+    Set-Formula $p "FillBkgnd" "RGB(255,255,255)"
+  }
+  Export-Doc $doc "patterns"
+  $doc.Close()
+
+  # ------------------------------------------------------------ gradients.vsdx
+  # Borderless, text-free tiles for measuring gradient origins: row 1 is
+  # FillGradientDir 1-13 (white -> blue stops), row 2 FillPattern 25-40 (white fg, blue bg).
+  $doc = $app.Documents.Add("")
+  $page = $doc.Pages.Item(1)
+  Set-Formula $page.PageSheet "PageWidth" "22 in"
+  Set-Formula $page.PageSheet "PageHeight" "4 in"
+  for ($d = 1; $d -le 13; $d++) {
+    $x = 0.2 + 1.6 * ($d - 1)
+    $g = $page.DrawRectangle($x, 2.2, $x + 1.2, 3.4)
+    Set-Formula $g "LinePattern" "0"
+    Set-Formula $g "FillGradientEnabled" "TRUE"
+    Set-Formula $g "FillGradientDir" "$d"
+    Set-Formula $g "FillGradientStops.GradientStopColor[1]" "RGB(255,255,255)"
+    Set-Formula $g "FillGradientStops.GradientStopPosition[1]" "0%"
+    Set-Formula $g "FillGradientStops.GradientStopColor[2]" "RGB(0,0,255)"
+    Set-Formula $g "FillGradientStops.GradientStopPosition[2]" "100%"
+  }
+  for ($i = 25; $i -le 40; $i++) {
+    $x = 0.2 + 1.3 * ($i - 25)
+    $p = $page.DrawRectangle($x, 0.4, $x + 1.0, 1.4)
+    Set-Formula $p "LinePattern" "0"
+    Set-Formula $p "FillPattern" "$i"
+    Set-Formula $p "FillForegnd" "RGB(255,255,255)"
+    Set-Formula $p "FillBkgnd" "RGB(0,0,255)"
+  }
+  Export-Doc $doc "gradients"
+  $doc.Close()
 }
 finally {
   $app.Quit()

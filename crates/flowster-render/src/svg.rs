@@ -10,6 +10,7 @@ use flowster_core::geom::Seg;
 use flowster_core::transform::Affine;
 use flowster_core::value::Rgba;
 
+use crate::paint::{Paint, Stop};
 use crate::{DisplayList, Item, Paragraph};
 
 /// Output pixels per inch for the SVG's width/height attributes.
@@ -72,6 +73,108 @@ fn wrap(p: &Paragraph, max_w: f64) -> Vec<Vec<(usize, String)>> {
     lines
 }
 
+fn stops_xml(stops: &[Stop]) -> String {
+    let mut out = String::new();
+    for st in stops {
+        write!(out, r#"<stop offset="{:.4}" stop-color="{}""#, st.offset, color(st.color)).ok();
+        if let Some(o) = opacity(st.color) {
+            write!(out, r#" stop-opacity="{o}""#).ok();
+        }
+        out.push_str("/>");
+    }
+    out
+}
+
+/// Writes the paint server for `paint` into `defs` and returns the fill attributes.
+fn paint_attrs(paint: &Paint, id: usize, d: &str, defs: &mut String) -> (String, Option<String>) {
+    match paint {
+        Paint::Solid { color: c } => {
+            let mut a = format!(r#" fill="{}" fill-rule="evenodd""#, color(*c));
+            if let Some(o) = opacity(*c) {
+                write!(a, r#" fill-opacity="{o}""#).ok();
+            }
+            (a, None)
+        }
+        Paint::Linear { space, x0, y0, x1, y1, stops } => {
+            writeln!(
+                defs,
+                r#"<linearGradient id="p{id}" gradientUnits="userSpaceOnUse" x1="{x0}" y1="{y0}" x2="{x1}" y2="{y1}" gradientTransform="{}">{}</linearGradient>"#,
+                matrix(space),
+                stops_xml(stops)
+            )
+            .ok();
+            (format!(r#" fill="url(#p{id})" fill-rule="evenodd""#), None)
+        }
+        Paint::Radial { space, cx, cy, r, stops } => {
+            writeln!(
+                defs,
+                r#"<radialGradient id="p{id}" gradientUnits="userSpaceOnUse" cx="{cx}" cy="{cy}" r="{r}" fx="{cx}" fy="{cy}" gradientTransform="{}">{}</radialGradient>"#,
+                matrix(space),
+                stops_xml(stops)
+            )
+            .ok();
+            (format!(r#" fill="url(#p{id})" fill-rule="evenodd""#), None)
+        }
+        Paint::Rect { space, ox, oy, extent, stops } => {
+            // No rectangular gradients in SVG. The whole shape gets the gradient along
+            // X (reflected about the origin), then the "bow tie" where Y dominates gets
+            // the gradient along Y. Both agree on the diagonals, so no seam shows.
+            let st = stops_xml(stops);
+            let m = matrix(space);
+            write!(
+                defs,
+                r#"<linearGradient id="p{id}x" gradientUnits="userSpaceOnUse" spreadMethod="reflect" x1="{ox}" y1="{oy}" x2="{}" y2="{oy}" gradientTransform="{m}">{st}</linearGradient><linearGradient id="p{id}y" gradientUnits="userSpaceOnUse" spreadMethod="reflect" x1="{ox}" y1="{oy}" x2="{ox}" y2="{}" gradientTransform="{m}">{st}</linearGradient>"#,
+                ox + extent,
+                oy + extent,
+            )
+            .ok();
+            let bow = format!(
+                "M{ox} {oy}L{} {}L{} {}ZM{ox} {oy}L{} {}L{} {}Z",
+                ox + 4.0,
+                oy + 4.0,
+                ox - 4.0,
+                oy + 4.0,
+                ox + 4.0,
+                oy - 4.0,
+                ox - 4.0,
+                oy - 4.0
+            );
+            writeln!(
+                defs,
+                r#"<clipPath id="c{id}y" clipPathUnits="userSpaceOnUse"><path transform="{m}" d="{bow}"/></clipPath>"#
+            )
+            .ok();
+            let body = format!(
+                r#"<path d="{d}" fill="url(#p{id}x)" fill-rule="evenodd"/><g clip-path="url(#c{id}y)"><path d="{d}" fill="url(#p{id}y)" fill-rule="evenodd"/></g>"#
+            );
+            (String::from(r#" fill="none""#), Some(body))
+        }
+        Paint::Pattern { space, bits, fg, bg } => {
+            let mut cells = format!(r#"<rect width="8" height="8" fill="{}"/>"#, color(*bg));
+            for (row, b) in bits.iter().enumerate() {
+                for col in 0..8 {
+                    if b & (0x80 >> col) != 0 {
+                        write!(
+                            cells,
+                            r#"<rect x="{col}" y="{}" width="1" height="1" fill="{}"/>"#,
+                            7 - row,
+                            color(*fg)
+                        )
+                        .ok();
+                    }
+                }
+            }
+            writeln!(
+                defs,
+                r#"<pattern id="p{id}" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="{}">{cells}</pattern>"#,
+                matrix(space)
+            )
+            .ok();
+            (format!(r#" fill="url(#p{id})" fill-rule="evenodd""#), None)
+        }
+    }
+}
+
 pub fn to_svg(dl: &DisplayList) -> String {
     let (w, h) = (dl.page.width, dl.page.height);
     let mut out = String::new();
@@ -84,18 +187,29 @@ pub fn to_svg(dl: &DisplayList) -> String {
     .ok();
     writeln!(out, r##"<rect width="{w}" height="{h}" fill="#ffffff"/>"##).ok();
     writeln!(out, r#"<g transform="matrix(1 0 0 -1 0 {h})">"#).ok();
-    for item in &dl.items {
+    let mut defs = String::new();
+    let mut body = String::new();
+    for (id, item) in dl.items.iter().enumerate() {
+        let out = &mut body;
         match item {
-            Item::Path { d, fill, stroke, .. } => {
+            Item::Path { d, fill, stroke, blur, .. } => {
+                let path = path_d(d);
                 let mut attrs = String::new();
+                let mut extra = None;
                 match fill {
                     Some(f) => {
-                        write!(attrs, r#" fill="{}" fill-rule="evenodd""#, color(*f)).ok();
-                        if let Some(o) = opacity(*f) {
-                            write!(attrs, r#" fill-opacity="{o}""#).ok();
-                        }
+                        let (a, e) = paint_attrs(f, id, &path, &mut defs);
+                        attrs.push_str(&a);
+                        extra = e;
                     }
                     None => attrs.push_str(r#" fill="none""#),
+                }
+                if *blur > 0.0 {
+                    writeln!(defs, r#"<filter id="b{id}" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="{:.5}"/></filter>"#, blur / 2.0).ok();
+                    write!(attrs, r#" filter="url(#b{id})""#).ok();
+                }
+                if let Some(e) = extra {
+                    out.push_str(&e);
                 }
                 if let Some(s) = stroke {
                     write!(
@@ -114,7 +228,7 @@ pub fn to_svg(dl: &DisplayList) -> String {
                         write!(attrs, r#" stroke-dasharray="{}""#, dash.join(" ")).ok();
                     }
                 }
-                writeln!(out, r#"<path d="{}"{attrs}/>"#, path_d(d)).ok();
+                writeln!(out, r#"<path d="{path}"{attrs}/>"#).ok();
             }
             Item::Image { transform, x, y, w, h, mime, data, .. } => {
                 // Images are stored top-down; flip back inside the shape frame.
@@ -190,6 +304,10 @@ pub fn to_svg(dl: &DisplayList) -> String {
             }
         }
     }
+    if !defs.is_empty() {
+        writeln!(out, "<defs>\n{defs}</defs>").ok();
+    }
+    out.push_str(&body);
     writeln!(out, "</g>\n</svg>").ok();
     out
 }

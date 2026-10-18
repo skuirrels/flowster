@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod paint;
 pub mod svg;
 
 use base64::Engine as _;
@@ -21,6 +22,7 @@ use flowster_core::theme::{EMU_PER_INCH, FillStyle, FontStyle, LineStyle, Slot, 
 use flowster_core::transform::Affine;
 use flowster_core::value::{Rgba, parse_color, parse_num};
 use libm::{atan2, cos, hypot, sin};
+pub use paint::{Paint, Stop};
 use serde::Serialize;
 
 #[derive(Clone, Debug, Serialize)]
@@ -87,7 +89,15 @@ pub struct Paragraph {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Item {
     #[serde(rename_all = "camelCase")]
-    Path { shape: u32, d: Vec<Seg>, fill: Option<Rgba>, stroke: Option<Stroke> },
+    Path {
+        shape: u32,
+        d: Vec<Seg>,
+        fill: Option<Paint>,
+        stroke: Option<Stroke>,
+        /// Gaussian blur radius in inches (shadows); 0 for none.
+        #[serde(skip_serializing_if = "is_zero", default)]
+        blur: f64,
+    },
     /// A text block. `transform` maps block-local inches (+Y up, origin at the
     /// block's bottom-left) to page inches.
     #[serde(rename_all = "camelCase")]
@@ -118,6 +128,10 @@ pub enum Item {
     },
 }
 
+fn is_zero(v: &f64) -> bool {
+    *v == 0.0
+}
+
 pub fn page_info(doc: &Document, index: usize) -> Option<PageInfo> {
     let p = doc.pages.get(index)?;
     let num = |n: &str| p.sheet.cell(n).and_then(|c| c.v.as_deref()).and_then(parse_num);
@@ -139,8 +153,15 @@ pub fn pages(doc: &Document) -> Vec<PageInfo> {
 /// Builds the display list of page `index`, its background pages first.
 pub fn build_page(doc: &Document, index: usize) -> Option<DisplayList> {
     let info = page_info(doc, index)?;
-    let mut b =
-        Builder { doc, items: Vec::new(), warnings: Vec::new(), layers: Vec::new(), variation: (0, 0), calc: None };
+    let mut b = Builder {
+        doc,
+        items: Vec::new(),
+        warnings: Vec::new(),
+        layers: Vec::new(),
+        variation: (0, 0),
+        calc: None,
+        page_shadow: (0.0, 0.0),
+    };
     let mut chain: Vec<&Page> = Vec::new();
     let mut next = doc.pages[index].back_page;
     while let Some(id) = next {
@@ -171,6 +192,16 @@ struct Builder<'d> {
     variation: (usize, usize),
     /// Formula engine for the current page: computes cells the file has no cached value for.
     calc: Option<Calc<'d>>,
+    /// The page's default shadow offset (`ShdwOffsetX/Y` in the page sheet).
+    page_shadow: (f64, f64),
+}
+
+/// A resolved drop shadow, in page inches.
+struct Shadow {
+    dx: f64,
+    dy: f64,
+    color: Rgba,
+    blur: f64,
 }
 
 /// Evaluates `THEMEVAL()` cells for one shape (SPEC §11).
@@ -192,6 +223,20 @@ impl Themer<'_> {
     }
     fn line(&self, r: &Resolved<'_>) -> Option<&LineStyle> {
         self.set.lines.get(self.row(r, "QuickStyleLineMatrix", Slot::Line))
+    }
+    fn effect(&self, r: &Resolved<'_>) -> Option<&flowster_core::theme::ShadowStyle> {
+        self.set.effects.get(self.row(r, "QuickStyleEffectsMatrix", Slot::Effect))?.as_ref()
+    }
+    fn gradient_stops(&self, r: &Resolved<'_>) -> Vec<Stop> {
+        let ph = self.placeholder(r, "QuickStyleFillColor");
+        self.fill(r)
+            .map(|f| {
+                f.gradient
+                    .iter()
+                    .map(|(pos, spec)| Stop { offset: *pos, color: self.theme.resolve(spec, ph) })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
     fn font(&self, r: &Resolved<'_>) -> Option<&FontStyle> {
         self.set.fonts.get(self.row(r, "QuickStyleFontMatrix", Slot::Font))
@@ -251,6 +296,7 @@ impl<'d> Builder<'d> {
         let index = |n: &str| num(n).filter(|v| *v >= 0.0 && *v < 65534.0).unwrap_or(0.0) as usize;
         self.variation = (index("VariationColorIndex"), index("VariationStyleIndex"));
         self.calc = Some(Calc::for_page(self.doc, page));
+        self.page_shadow = (num("ShdwOffsetX").unwrap_or(0.125), num("ShdwOffsetY").unwrap_or(-0.125));
         let root = Affine::scale(scale, scale);
         for s in &page.shapes {
             self.shape(s, root, None);
@@ -384,13 +430,7 @@ impl<'d> Builder<'d> {
             }
         }
 
-        let fill_pattern = self.num(r, "FillPattern", |t| Some(t.fill(r).and_then(|f| f.pattern).unwrap_or(1.0)), 1.0);
-        let fill = if fill_pattern != 0.0 && !fill_segs.is_empty() {
-            let color = self.color(r, "FillForegnd", |t| t.fill_color(r), Rgba::WHITE);
-            Some(color.with_transparency(self.num(r, "FillForegndTrans", |_| None, 0.0)))
-        } else {
-            None
-        };
+        let fill = if fill_segs.is_empty() { None } else { self.fill_paint(r, world, w, h) };
         let line_pattern = self.num(r, "LinePattern", |t| Some(t.line(r).and_then(|l| l.pattern).unwrap_or(1.0)), 1.0);
         let weight = self
             .num(
@@ -419,19 +459,181 @@ impl<'d> Builder<'d> {
 
         let shape = r.shape().id;
         let to_page = |segs: &[Seg]| segs.iter().map(|s| s.map(|p| world.apply(p))).collect::<Vec<_>>();
+        if let Some(sh) = self.shadow(r) {
+            // The silhouette, offset on the page (shadows do not rotate with the shape).
+            let offset = |segs: &[Seg]| {
+                segs.iter()
+                    .map(|s| {
+                        s.map(|p| {
+                            let q = world.apply(p);
+                            (q.0 + sh.dx, q.1 + sh.dy)
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            };
+            if fill.is_some() {
+                self.items.push(Item::Path {
+                    shape,
+                    d: offset(&fill_segs),
+                    fill: Some(Paint::Solid { color: sh.color }),
+                    stroke: None,
+                    blur: sh.blur,
+                });
+            }
+            if let Some(st) = &stroke
+                && (fill.is_none() || fill_segs != stroke_segs)
+            {
+                self.items.push(Item::Path {
+                    shape,
+                    d: offset(&stroke_segs),
+                    fill: None,
+                    stroke: Some(Stroke { color: sh.color, ..st.clone() }),
+                    blur: sh.blur,
+                });
+            }
+        }
         // Fill and outline coincide for ordinary closed shapes: one item does both.
         if fill.is_some() && stroke.is_some() && fill_segs == stroke_segs {
-            self.items.push(Item::Path { shape, d: to_page(&fill_segs), fill, stroke });
+            self.items.push(Item::Path { shape, d: to_page(&fill_segs), fill, stroke, blur: 0.0 });
             return;
         }
         if let Some(fill) = fill {
-            self.items.push(Item::Path { shape, d: to_page(&fill_segs), fill: Some(fill), stroke: None });
+            self.items.push(Item::Path { shape, d: to_page(&fill_segs), fill: Some(fill), stroke: None, blur: 0.0 });
         }
         if let Some(stroke) = stroke {
             let mut d = to_page(&stroke_segs);
             let arrows = self.arrows(r, &mut d, &stroke);
-            self.items.push(Item::Path { shape, d, fill: None, stroke: Some(stroke) });
+            self.items.push(Item::Path { shape, d, fill: None, stroke: Some(stroke), blur: 0.0 });
             self.items.extend(arrows);
+        }
+    }
+
+    /// The fill of a closed shape: modern gradient, legacy gradient, hatch or solid.
+    fn fill_paint(&self, r: &Resolved<'_>, world: Affine, w: f64, h: f64) -> Option<Paint> {
+        let pattern =
+            self.num(r, "FillPattern", |t| Some(t.fill(r).and_then(|f| f.pattern).unwrap_or(1.0)), 1.0) as i64;
+        if pattern == 0 {
+            return None;
+        }
+        let fg = self.color(r, "FillForegnd", |t| t.fill_color(r), Rgba::WHITE).with_transparency(self.num(
+            r,
+            "FillForegndTrans",
+            |_| None,
+            0.0,
+        ));
+        let gradient_on = self.num(
+            r,
+            "FillGradientEnabled",
+            |t| Some(if t.fill(r).is_some_and(|f| !f.gradient.is_empty()) { 1.0 } else { 0.0 }),
+            0.0,
+        ) != 0.0;
+        if gradient_on {
+            let stops = self.gradient_stops(r);
+            if stops.len() >= 2 {
+                let dir = self.num(r, "FillGradientDir", |t| t.fill(r).and_then(|f| f.gradient_dir), 0.0);
+                let angle = self.num(
+                    r,
+                    "FillGradientAngle",
+                    |t| t.fill(r).and_then(|f| f.gradient_angle),
+                    core::f64::consts::FRAC_PI_2,
+                );
+                return Some(paint::gradient(world, w, h, dir, angle, stops));
+            }
+            if let Some(s) = stops.first() {
+                return Some(Paint::Solid { color: s.color });
+            }
+        }
+        if pattern == 1 {
+            return Some(Paint::Solid { color: fg });
+        }
+        let bg = self.color(r, "FillBkgnd", |_| None, Rgba::WHITE).with_transparency(self.num(
+            r,
+            "FillBkgndTrans",
+            |_| None,
+            0.0,
+        ));
+        paint::hatch(pattern, fg, bg)
+            .or_else(|| paint::legacy_gradient(world, w, h, pattern, fg, bg))
+            .or(Some(Paint::Solid { color: fg }))
+    }
+
+    /// Gradient stops from the `FillGradient` section (shape chain, then the
+    /// fill style chain), evaluating themed stops against the theme.
+    fn gradient_stops(&self, r: &Resolved<'_>) -> Vec<Stop> {
+        let secs = r.sections("FillGradient");
+        let rows: Vec<(Option<String>, Option<String>, Option<String>)> = match secs.first() {
+            Some(sec) => sec
+                .rows
+                .iter()
+                .map(|row| {
+                    (
+                        row.v.get("GradientStopColor").cloned(),
+                        row.v.get("GradientStopColorTrans").cloned(),
+                        row.v.get("GradientStopPosition").cloned(),
+                    )
+                })
+                .collect(),
+            None => r
+                .style_chain(flowster_core::resolve::Category::Fill)
+                .into_iter()
+                .find_map(|st| st.sheet.section("FillGradient", None))
+                .map(|sec| {
+                    sec.rows
+                        .iter()
+                        .map(|row| {
+                            let v = |c: &str| row.cells.get(c).and_then(|c| c.v.clone());
+                            (v("GradientStopColor"), v("GradientStopColorTrans"), v("GradientStopPosition"))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        };
+        let themed = rows.iter().any(|(c, _, _)| c.as_deref().is_some_and(flowster_core::value::is_placeholder));
+        if themed || rows.is_empty() {
+            return self.themer(r).map(|t| t.gradient_stops(r)).unwrap_or_default();
+        }
+        let mut stops: Vec<Stop> = rows
+            .iter()
+            .filter_map(|(c, tr, pos)| {
+                let color = parse_color(c.as_deref()?, &self.doc.colors)?;
+                let trans = tr.as_deref().and_then(parse_num).unwrap_or(0.0);
+                Some(Stop {
+                    offset: pos.as_deref().and_then(parse_num).unwrap_or(0.0).clamp(0.0, 1.0),
+                    color: color.with_transparency(trans),
+                })
+            })
+            .collect();
+        stops.sort_by(|a, b| a.offset.total_cmp(&b.offset));
+        stops
+    }
+
+    /// Drop shadow from the shadow cells, the page defaults or the theme's effect style.
+    fn shadow(&self, r: &Resolved<'_>) -> Option<Shadow> {
+        match r.lookup("ShdwPattern") {
+            Lookup::Value(v) if parse_num(v).unwrap_or(0.0) != 0.0 => {
+                let (dx, dy) = match self.num(r, "ShapeShdwType", |_| None, 0.0) as i64 {
+                    0 => self.page_shadow,
+                    _ => {
+                        (self.num(r, "ShapeShdwOffsetX", |_| None, 0.0), self.num(r, "ShapeShdwOffsetY", |_| None, 0.0))
+                    }
+                };
+                let color = self.color(r, "ShdwForegnd", |_| None, Rgba(0, 0, 0, 255)).with_transparency(self.num(
+                    r,
+                    "ShdwForegndTrans",
+                    |_| None,
+                    0.0,
+                ));
+                Some(Shadow { dx, dy, color, blur: self.num(r, "ShapeShdwBlur", |_| None, 0.0).max(0.0) })
+            }
+            Lookup::Themed => {
+                let t = self.themer(r)?;
+                let e = t.effect(r)?;
+                let ph = t.placeholder(r, "QuickStyleShadowColor").or(Some(Rgba(0, 0, 0, 255)));
+                let color = e.color.as_ref().map(|c| t.theme.resolve(c, ph)).unwrap_or(Rgba(0, 0, 0, 102));
+                let dist = e.dist_emu / EMU_PER_INCH;
+                Some(Shadow { dx: dist * cos(e.dir), dy: -dist * sin(e.dir), color, blur: e.blur_emu / EMU_PER_INCH })
+            }
+            _ => None,
         }
     }
 
@@ -496,6 +698,7 @@ impl<'d> Builder<'d> {
                     ],
                     fill: None,
                     stroke: Some(Stroke { dash: Vec::new(), ..stroke.clone() }),
+                    blur: 0.0,
                 });
             } else {
                 // Stop the line inside the head so thick lines do not poke past the tip.
@@ -514,8 +717,9 @@ impl<'d> Builder<'d> {
                         Seg::L { x: right.0, y: right.1 },
                         Seg::Z,
                     ],
-                    fill: Some(stroke.color),
+                    fill: Some(Paint::Solid { color: stroke.color }),
                     stroke: None,
+                    blur: 0.0,
                 });
             }
         }

@@ -126,8 +126,23 @@ export interface Paragraph {
   runs: Run[];
 }
 
+export interface Stop {
+  offset: number;
+  color: Rgba;
+}
+
+/** Fill paints. Gradient and pattern coordinates are in paint space, mapped to the page by `space`. */
+export type Paint =
+  | { type: "solid"; color: Rgba }
+  | { type: "linear"; space: Affine; x0: number; y0: number; x1: number; y1: number; stops: Stop[] }
+  | { type: "radial"; space: Affine; cx: number; cy: number; r: number; stops: Stop[] }
+  /** Square isolines: offset = Chebyshev distance from (ox, oy) / extent. */
+  | { type: "rect"; space: Affine; ox: number; oy: number; extent: number; stops: Stop[] }
+  /** 8 × 8 bitmap (row 0 at the top, bit 7 on the left), one bit per paint unit. */
+  | { type: "pattern"; space: Affine; bits: number[]; fg: Rgba; bg: Rgba };
+
 export type Item =
-  | { kind: "path"; shape: number; d: Seg[]; fill: Rgba | null; stroke: Stroke | null }
+  | { kind: "path"; shape: number; d: Seg[]; fill: Paint | null; stroke: Stroke | null; blur?: number }
   | {
       kind: "text";
       shape: number;

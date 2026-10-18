@@ -1,6 +1,6 @@
 //! Theme part (DrawingML `a:theme` + Visio `vt:` extensions) → [`Theme`].
 
-use flowster_core::theme::{ColorBase, ColorSpec, FillStyle, FontStyle, LineStyle, StyleSet, Theme};
+use flowster_core::theme::{ColorBase, ColorSpec, FillStyle, FontStyle, LineStyle, ShadowStyle, StyleSet, Theme};
 use flowster_core::value::Rgba;
 
 use crate::dom::El;
@@ -73,16 +73,46 @@ fn first_color(el: &El) -> Option<ColorSpec> {
 }
 
 fn fill_style(el: &El) -> FillStyle {
-    let color = match el.name.as_str() {
-        "solidFill" => first_color(el),
-        // Gradients are drawn solid with their middle stop until gradient fills land.
-        "gradFill" => el.child("gsLst").and_then(|l| {
-            let stops: Vec<&El> = l.children_named("gs").collect();
-            stops.get(stops.len() / 2).and_then(|s| first_color(s))
-        }),
-        _ => None,
-    };
-    FillStyle { color, pattern: if el.name == "noFill" { Some(0.0) } else { None } }
+    let mut style = FillStyle { pattern: if el.name == "noFill" { Some(0.0) } else { None }, ..Default::default() };
+    match el.name.as_str() {
+        "solidFill" => style.color = first_color(el),
+        "gradFill" => {
+            if let Some(l) = el.child("gsLst") {
+                style.gradient = l
+                    .children_named("gs")
+                    .filter_map(|g| Some((g.attr("pos").and_then(pct).unwrap_or(0.0), first_color(g)?)))
+                    .collect();
+                style.gradient.sort_by(|a, b| a.0.total_cmp(&b.0));
+            }
+            // A representative colour for consumers that cannot draw gradients.
+            style.color = style.gradient.get(style.gradient.len() / 2).map(|(_, c)| c.clone());
+            if let Some(lin) = el.child("lin") {
+                style.gradient_dir = Some(0.0);
+                // 60000ths of a degree, clockwise.
+                style.gradient_angle = lin
+                    .attr("ang")
+                    .and_then(|a| a.parse::<f64>().ok())
+                    .map(|a| a / 60_000.0 * core::f64::consts::PI / 180.0);
+            } else if let Some(path) = el.child("path") {
+                style.gradient_dir = Some(if path.attr("path") == Some("rect") { 10.0 } else { 3.0 });
+            } else {
+                style.gradient_dir = Some(0.0);
+            }
+        }
+        _ => {}
+    }
+    style
+}
+
+fn effect_style(el: &El) -> Option<ShadowStyle> {
+    let sh = find(el, "outerShdw")?;
+    let num = |k: &str| sh.attr(k).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
+    Some(ShadowStyle {
+        blur_emu: num("blurRad"),
+        dist_emu: num("dist"),
+        dir: num("dir") / 60_000.0 * core::f64::consts::PI / 180.0,
+        color: first_color(sh),
+    })
 }
 
 fn line_style(el: &El) -> LineStyle {
@@ -118,6 +148,10 @@ fn style_set(fmt: &El) -> StyleSet {
         fills: fmt.child("fillStyleLst").map(|l| l.children().map(fill_style).collect()).unwrap_or_default(),
         lines: fmt.child("lnStyleLst").map(|l| l.children_named("ln").map(line_style).collect()).unwrap_or_default(),
         fonts: Vec::new(),
+        effects: fmt
+            .child("effectStyleLst")
+            .map(|l| l.children_named("effectStyle").map(effect_style).collect())
+            .unwrap_or_default(),
     }
 }
 

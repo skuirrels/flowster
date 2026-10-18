@@ -1,7 +1,8 @@
 // Canvas 2D renderer for engine display lists (SPEC §8.6, P0 backend).
 // Page coordinates are inches with +Y up; the view maps them to CSS pixels.
 
-import type { Affine, DisplayList, Item, Paragraph, Rgba, Run, Seg } from "../engine/protocol";
+import type { Affine, DisplayList, Item, Paragraph, Run, Seg } from "../engine/protocol";
+import { css, fillPaint, mul } from "./paint";
 
 export interface View {
   /** CSS pixels per inch. */
@@ -15,16 +16,6 @@ export interface View {
 const TEXT_UNITS = 100;
 const FONT_FALLBACKS = `Calibri, Carlito, "Segoe UI", "Helvetica Neue", Arial, sans-serif`;
 
-const css = ([r, g, b, a]: Rgba) => `rgba(${r},${g},${b},${(a / 255).toFixed(3)})`;
-
-const mul = (m: Affine, n: Affine): Affine => [
-  m[0] * n[0] + m[2] * n[1],
-  m[1] * n[0] + m[3] * n[1],
-  m[0] * n[2] + m[2] * n[3],
-  m[1] * n[2] + m[3] * n[3],
-  m[0] * n[4] + m[2] * n[5] + m[4],
-  m[1] * n[4] + m[3] * n[5] + m[5],
-];
 
 const paths = new WeakMap<Seg[], Path2D>();
 function toPath(d: Seg[]): Path2D {
@@ -103,12 +94,12 @@ export function render(
 
 function drawItem(ctx: CanvasRenderingContext2D, item: Item, pageToDevice: Affine, onePx: number, onAsyncLoad: () => void) {
   if (item.kind === "path") {
-    ctx.setTransform(...pageToDevice);
     const p = toPath(item.d);
-    if (item.fill) {
-      ctx.fillStyle = css(item.fill);
-      ctx.fill(p, "evenodd");
-    }
+    // Shadows carry a blur radius in inches; canvas blur() takes a device-pixel radius.
+    const blurred = (item.blur ?? 0) > 0;
+    if (blurred) ctx.filter = `blur(${((item.blur ?? 0) / 2 / onePx).toFixed(2)}px)`;
+    if (item.fill) fillPaint(ctx, p, item.fill, pageToDevice);
+    ctx.setTransform(...pageToDevice);
     if (item.stroke) {
       const s = item.stroke;
       ctx.strokeStyle = css(s.color);
@@ -119,6 +110,7 @@ function drawItem(ctx: CanvasRenderingContext2D, item: Item, pageToDevice: Affin
       ctx.stroke(p);
       ctx.setLineDash([]);
     }
+    if (blurred) ctx.filter = "none";
   } else if (item.kind === "image") {
     // Images are top-down; flip inside the shape frame.
     const m = mul(pageToDevice, mul(item.transform, [1, 0, 0, -1, item.x, item.y + item.h]));

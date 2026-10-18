@@ -31,6 +31,23 @@ pub struct FillStyle {
     /// Solid colour, or a representative stop of a gradient.
     pub color: Option<ColorSpec>,
     pub pattern: Option<f64>,
+    /// Gradient stops `(position 0–1, colour)` when the style is a gradient fill.
+    pub gradient: Vec<(f64, ColorSpec)>,
+    /// Gradient geometry, in Visio's `FillGradientDir` terms (0 linear, 3 radial
+    /// from centre, 10 rectangular from centre).
+    pub gradient_dir: Option<f64>,
+    /// Linear gradient angle in radians (DrawingML `lin ang`).
+    pub gradient_angle: Option<f64>,
+}
+
+/// A theme effect's outer shadow (DrawingML `outerShdw`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ShadowStyle {
+    pub blur_emu: f64,
+    pub dist_emu: f64,
+    /// Direction in radians, clockwise from +X on screen.
+    pub dir: f64,
+    pub color: Option<ColorSpec>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -58,6 +75,8 @@ pub struct StyleSet {
     pub fills: Vec<FillStyle>,
     pub lines: Vec<LineStyle>,
     pub fonts: Vec<FontStyle>,
+    /// Effect styles; `None` for effects without an outer shadow.
+    pub effects: Vec<Option<ShadowStyle>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
