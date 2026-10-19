@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 
 import { CanvasView, PX_PER_INCH, type CanvasHandle, type Tool } from "./canvas/CanvasView";
+import { Icon, shortcut, type IconName } from "./chrome/icons";
+import { Inspector } from "./chrome/Inspector";
+import { MenuBar, type Menu } from "./chrome/MenuBar";
 import { PackageView } from "./chrome/PackageView";
+import { AboutDialog, ShortcutsDialog, Welcome } from "./chrome/Welcome";
 import type { EngineClient } from "./engine/client";
 import type { Command, DisplayList, DocInfo, OpenResult, PackageInfo, PageInfo, SyncState } from "./engine/protocol";
 import { inTauri, pickDocument, saveDocument, type PickedFile } from "./host";
@@ -24,17 +28,48 @@ type Mode = "drawing" | "package";
 const ZOOM_STEPS = [0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8];
 
 /** Drawing tools, with Visio's shortcuts. */
-const TOOLS: { tool: Tool; label: string; key: string }[] = [
-  { tool: "select", label: "Pointer", key: "1" },
-  { tool: "rectangle", label: "Rectangle", key: "8" },
-  { tool: "ellipse", label: "Ellipse", key: "9" },
-  { tool: "line", label: "Line", key: "6" },
+const TOOLS: { tool: Tool; label: string; key: string; icon: IconName }[] = [
+  { tool: "select", label: "Pointer", key: "1", icon: "pointer" },
+  { tool: "rectangle", label: "Rectangle", key: "8", icon: "rectangle" },
+  { tool: "ellipse", label: "Ellipse", key: "9", icon: "ellipse" },
+  { tool: "line", label: "Line", key: "6", icon: "line" },
 ];
 
 interface TextEdit {
   id: number;
   text: string;
   rect: [number, number, number, number];
+}
+
+/** A toolbar button: icon only, with a tooltip naming it and its shortcut. */
+function ToolButton({
+  icon,
+  label,
+  keys,
+  onClick,
+  disabled,
+  pressed,
+}: {
+  icon: IconName;
+  label: string;
+  keys?: string;
+  onClick: () => void;
+  disabled?: boolean;
+  pressed?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className="tb"
+      aria-label={label}
+      aria-pressed={pressed}
+      data-tip={keys ? `${label}  ${shortcut(keys)}` : label}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      <Icon name={icon} />
+    </button>
+  );
 }
 
 export function App({ engine }: { engine: EngineClient }) {
@@ -53,6 +88,9 @@ export function App({ engine }: { engine: EngineClient }) {
   const [selection, setSelection] = useState<number[]>([]);
   const [editing, setEditing] = useState<TextEdit | null>(null);
   const [savedAs, setSavedAs] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [inspector, setInspector] = useState(true);
+  const [dialog, setDialog] = useState<"shortcuts" | "about" | null>(null);
   /** Bumped after every change so the page is fetched again. */
   const [version, setVersion] = useState(0);
   const canvas = useRef<CanvasHandle>(null);
@@ -66,7 +104,7 @@ export function App({ engine }: { engine: EngineClient }) {
     [engine],
   );
 
-  // Fetch the display list whenever the document or page changes.
+  // Fetch the display list whenever the document, page or content changes.
   useEffect(() => {
     if (!doc || doc.pages.length === 0) {
       setDl(null);
@@ -109,6 +147,8 @@ export function App({ engine }: { engine: EngineClient }) {
       setSelection([]);
       setEditing(null);
       setTool("select");
+      setDirty(false);
+      setSavedAs(null);
       setDoc({ open, pkg, info, pages });
       setMode(pages.length > 0 ? "drawing" : "package");
       setHash(derived.hash);
@@ -132,8 +172,7 @@ export function App({ engine }: { engine: EngineClient }) {
       setError(null);
       try {
         if (doc) await engine.close(doc.open.doc);
-        const open = await engine.open(file.bytes, file.fileName);
-        await showDoc(open);
+        await showDoc(await engine.open(file.bytes, file.fileName));
       } catch (e) {
         setDoc(null);
         setError(e instanceof Error ? e.message : String(e));
@@ -169,6 +208,7 @@ export function App({ engine }: { engine: EngineClient }) {
       try {
         const changes = await engine.exec(doc.open.doc, cmd);
         setVersion((v) => v + 1);
+        setDirty(true);
         if (changes?.created) setSelection([changes.created[1]]);
         await refreshInfo(doc.open.doc);
       } catch (e) {
@@ -185,7 +225,10 @@ export function App({ engine }: { engine: EngineClient }) {
       const bytes = await engine.save(doc.open.doc);
       const stem = doc.info.fileName.replace(/\.[^.]+$/, "");
       const saved = await saveDocument(`${stem}.vsdx`, bytes);
-      if (saved) setSavedAs(saved);
+      if (saved) {
+        setSavedAs(saved);
+        setDirty(false);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -194,6 +237,10 @@ export function App({ engine }: { engine: EngineClient }) {
   const deleteSelection = useCallback(() => {
     if (selection.length > 0) void exec({ kind: "deleteShapes", page, shapes: selection });
   }, [exec, page, selection]);
+
+  const selectAll = useCallback(() => {
+    if (dl) setSelection(dl.shapes.map((b) => b.id));
+  }, [dl]);
 
   const editText = useCallback(
     (id: number) => {
@@ -224,6 +271,8 @@ export function App({ engine }: { engine: EngineClient }) {
     [zoom],
   );
 
+  const drawing = !!doc && mode === "drawing" && !!dl;
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
@@ -239,10 +288,13 @@ export function App({ engine }: { engine: EngineClient }) {
       } else if (mod && key === "n") {
         e.preventDefault();
         void onNew();
-      } else if (toolKey && doc && !inInput) {
+      } else if (toolKey && drawing && !inInput) {
         e.preventDefault();
         setTool(toolKey.tool);
-      } else if ((e.key === "Delete" || e.key === "Backspace") && !inInput && doc) {
+      } else if (mod && key === "a" && drawing && !inInput) {
+        e.preventDefault();
+        selectAll();
+      } else if ((e.key === "Delete" || e.key === "Backspace") && !inInput && drawing) {
         e.preventDefault();
         deleteSelection();
       } else if (e.key === "Escape" && !inInput) {
@@ -275,7 +327,74 @@ export function App({ engine }: { engine: EngineClient }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [doc, exec, onOpen, onNew, onSave, stepZoom, deleteSelection, editText, selection]);
+  }, [doc, drawing, exec, onOpen, onNew, onSave, stepZoom, deleteSelection, selectAll, editText, selection]);
+
+  const menus: Menu[] = useMemo(
+    () => [
+      {
+        label: "File",
+        items: [
+          { label: "New drawing", icon: "new", keys: "Ctrl+N", run: () => void onNew() },
+          { label: "Open…", icon: "open", keys: "Ctrl+O", run: () => void onOpen(), disabled: busy },
+          "separator",
+          { label: "Save as .vsdx…", icon: "save", keys: "Ctrl+S", run: () => void onSave(), disabled: !doc?.pages.length },
+        ],
+      },
+      {
+        label: "Edit",
+        items: [
+          {
+            label: undo.labels[0] ? `Undo ${undo.labels[0]}` : "Undo",
+            icon: "undo",
+            keys: "Ctrl+Z",
+            run: () => void exec({ kind: "undo" }),
+            disabled: !undo.canUndo,
+          },
+          { label: "Redo", icon: "redo", keys: "Ctrl+Y", run: () => void exec({ kind: "redo" }), disabled: !undo.canRedo },
+          "separator",
+          { label: "Select all", icon: "selectAll", keys: "Ctrl+A", run: selectAll, disabled: !drawing },
+          { label: "Edit text", icon: "text", keys: "F2", run: () => editText(selection[0]), disabled: selection.length !== 1 },
+          { label: "Delete", icon: "trash", keys: "Del", run: deleteSelection, disabled: selection.length === 0 },
+        ],
+      },
+      {
+        label: "View",
+        items: [
+          { label: "Zoom in", icon: "zoomIn", keys: "Ctrl++", run: () => stepZoom(1), disabled: !drawing },
+          { label: "Zoom out", icon: "zoomOut", keys: "Ctrl+-", run: () => stepZoom(-1), disabled: !drawing },
+          { label: "Fit page", icon: "fit", keys: "Ctrl+Shift+W", run: () => canvas.current?.fit(), disabled: !drawing },
+          "separator",
+          { label: "Inspector", checked: inspector, run: () => setInspector((v) => !v), disabled: !doc },
+          "separator",
+          { label: "Drawing", checked: mode === "drawing", run: () => setMode("drawing"), disabled: !doc },
+          { label: "Package parts", checked: mode === "package", run: () => setMode("package"), disabled: !doc },
+        ],
+      },
+      {
+        label: "Insert",
+        items: TOOLS.slice(1).map((t) => ({
+          label: t.label,
+          icon: t.icon,
+          keys: `Ctrl+${t.key}`,
+          run: () => {
+            setMode("drawing");
+            setTool(t.tool);
+          },
+          disabled: !doc,
+        })),
+      },
+      {
+        label: "Help",
+        items: [
+          { label: "Keyboard shortcuts", icon: "keyboard", run: () => setDialog("shortcuts") },
+          { label: "About Flowster", icon: "info", run: () => setDialog("about") },
+        ],
+      },
+    ],
+    [busy, deleteSelection, doc, drawing, editText, exec, inspector, mode, onNew, onOpen, onSave, selectAll, selection, stepZoom, undo],
+  );
+
+  const title = doc?.info.meta.title || doc?.info.fileName.replace(/\.[^.]+$/, "") || "";
 
   return (
     <div
@@ -287,195 +406,210 @@ export function App({ engine }: { engine: EngineClient }) {
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
     >
-      <header className="toolbar">
-        <span className="brand">Flowster</span>
-        <button type="button" onClick={onNew} title="New drawing (Ctrl+N)">
-          New
-        </button>
-        <button type="button" onClick={onOpen} disabled={busy} title="Open (Ctrl+O)">
-          {busy ? "Opening…" : "Open…"}
-        </button>
-        <button type="button" onClick={onSave} disabled={!doc || doc.pages.length === 0} title="Save as .vsdx (Ctrl+S)">
-          Save
-        </button>
-        <button type="button" onClick={() => exec({ kind: "undo" })} disabled={!undo.canUndo} title="Undo (Ctrl+Z)">
-          Undo
-        </button>
-        <button type="button" onClick={() => exec({ kind: "redo" })} disabled={!undo.canRedo} title="Redo (Ctrl+Y)">
-          Redo
-        </button>
-        {doc && mode === "drawing" && (
-          <div className="segmented tools" role="toolbar" aria-label="Tools">
-            {TOOLS.map((t) => (
-              <button
-                type="button"
-                key={t.tool}
-                aria-pressed={tool === t.tool}
-                onClick={() => setTool(t.tool)}
-                title={`${t.label} (Ctrl+${t.key})`}
-              >
-                {t.label}
+      <header className="titlebar">
+        <div className="brand">
+          <span className="brand-mark">
+            <Icon name="logo" size={16} />
+          </span>
+          <span className="brand-name">Flowster</span>
+        </div>
+        <MenuBar menus={menus} />
+        <div className="doc-title">
+          {doc && (
+            <>
+              <span className="doc-name" title={doc.info.fileName}>
+                {title}
+              </span>
+              <span className={`doc-state${dirty ? " dirty" : ""}`}>{dirty ? "Edited" : savedAs ? "Saved" : "Opened"}</span>
+            </>
+          )}
+        </div>
+        <div className="titlebar-end">
+          {doc && (
+            <div className="seg" role="tablist" aria-label="View">
+              <button type="button" role="tab" aria-selected={mode === "drawing"} onClick={() => setMode("drawing")}>
+                <Icon name="drawing" size={15} /> Drawing
               </button>
-            ))}
-          </div>
-        )}
-        {doc && mode === "drawing" && (
-          <button type="button" onClick={deleteSelection} disabled={selection.length === 0} title="Delete (Del)">
-            Delete
-          </button>
-        )}
-        {doc && (
-          <div className="segmented" role="tablist" aria-label="View">
-            <button type="button" role="tab" aria-selected={mode === "drawing"} onClick={() => setMode("drawing")}>
-              Drawing
-            </button>
-            <button type="button" role="tab" aria-selected={mode === "package"} onClick={() => setMode("package")}>
-              Package
-            </button>
-          </div>
-        )}
-        {doc && (
-          <TitleField
-            key={doc.open.doc + doc.info.meta.title}
-            value={doc.info.meta.title ?? ""}
-            onCommit={(v) => exec({ kind: "setDocProp", key: "title", value: v })}
-          />
-        )}
+              <button type="button" role="tab" aria-selected={mode === "package"} onClick={() => setMode("package")}>
+                <Icon name="package" size={15} /> Package
+              </button>
+            </div>
+          )}
+        </div>
       </header>
 
-      <main className="main">
+      {doc && (
+        <div className="toolbar" role="toolbar" aria-label="Commands">
+          <div className="tb-group">
+            <ToolButton icon="new" label="New drawing" keys="Ctrl+N" onClick={() => void onNew()} />
+            <ToolButton icon="open" label="Open" keys="Ctrl+O" onClick={() => void onOpen()} disabled={busy} />
+            <ToolButton icon="save" label="Save as .vsdx" keys="Ctrl+S" onClick={() => void onSave()} disabled={!doc.pages.length} />
+          </div>
+          <div className="tb-group">
+            <ToolButton
+              icon="undo"
+              label={undo.labels[0] ? `Undo ${undo.labels[0]}` : "Undo"}
+              keys="Ctrl+Z"
+              onClick={() => void exec({ kind: "undo" })}
+              disabled={!undo.canUndo}
+            />
+            <ToolButton icon="redo" label="Redo" keys="Ctrl+Y" onClick={() => void exec({ kind: "redo" })} disabled={!undo.canRedo} />
+          </div>
+          {mode === "drawing" && (
+            <>
+              <div className="tb-group tools" aria-label="Tools">
+                {TOOLS.map((t) => (
+                  <ToolButton
+                    key={t.tool}
+                    icon={t.icon}
+                    label={t.label}
+                    keys={`Ctrl+${t.key}`}
+                    pressed={tool === t.tool}
+                    onClick={() => setTool(t.tool)}
+                  />
+                ))}
+              </div>
+              <div className="tb-group">
+                <ToolButton icon="text" label="Edit text" keys="F2" onClick={() => editText(selection[0])} disabled={selection.length !== 1} />
+                <ToolButton icon="trash" label="Delete" keys="Del" onClick={deleteSelection} disabled={selection.length === 0} />
+              </div>
+              <div className="tb-spacer" />
+              <div className="tb-group zoom">
+                <ToolButton icon="zoomOut" label="Zoom out" keys="Ctrl+-" onClick={() => stepZoom(-1)} />
+                <button type="button" className="zoom-pct" data-tip="Fit page  Ctrl+Shift+W" onClick={() => canvas.current?.fit()}>
+                  {Math.round((zoom / PX_PER_INCH) * 100)}%
+                </button>
+                <ToolButton icon="zoomIn" label="Zoom in" keys="Ctrl++" onClick={() => stepZoom(1)} />
+                <ToolButton icon="fit" label="Fit page" keys="Ctrl+Shift+W" onClick={() => canvas.current?.fit()} />
+              </div>
+              <div className="tb-group">
+                <ToolButton icon="panel" label="Inspector" onClick={() => setInspector((v) => !v)} pressed={inspector} />
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      <main className="workspace">
         {error && (
-          <div className="error" role="alert">
-            {error}
-            <button type="button" className="link" onClick={() => setError(null)}>
-              Dismiss
+          <div className="banner error" role="alert">
+            <Icon name="info" size={16} />
+            <span>{error}</span>
+            <button type="button" className="icon-btn" aria-label="Dismiss" onClick={() => setError(null)}>
+              <Icon name="close" size={14} />
             </button>
           </div>
         )}
-        {!doc && !error && (
-          <div className="empty">
-            <p>Create a new drawing, or open a Visio drawing (.vsdx).</p>
-            <p className="empty-actions">
-              <button type="button" className="primary" onClick={onNew}>
-                New drawing
-              </button>
-              <button type="button" onClick={onOpen}>
-                Open…
-              </button>
-            </p>
-            <p className="hint">Or drop a file anywhere in this window.</p>
-          </div>
-        )}
+        {!doc && <Welcome onNew={() => void onNew()} onOpen={() => void onOpen()} busy={busy} />}
         {doc && mode === "package" && <PackageView open={doc.open} pkg={doc.pkg} info={doc.info} />}
         {doc && mode === "drawing" && (
-          <div className="drawing">
-            {dl ? (
-              <CanvasView
-                ref={canvas}
-                dl={dl}
-                tool={tool}
-                selection={selection}
-                onSelection={setSelection}
-                onCommand={(c) => {
-                  // Back to the pointer as soon as a shape is drawn (not when the
-                  // engine replies, which could undo a tool picked meanwhile).
-                  if (c.kind === "addShape") setTool("select");
-                  void exec(c);
-                }}
-                onEditText={editText}
-                onZoomChange={setZoom}
-              />
-            ) : (
-              <div className="empty">
-                <p>{doc.pages.length === 0 ? "This file has no drawing pages." : "Loading page…"}</p>
-              </div>
-            )}
-            {editing && (
-              <textarea
-                className="text-editor"
-                autoFocus
-                value={editing.text}
-                style={{
-                  left: editing.rect[0],
-                  top: editing.rect[1],
-                  width: Math.max(80, editing.rect[2]),
-                  height: Math.max(32, editing.rect[3]),
-                }}
-                onChange={(e) => setEditing({ ...editing, text: e.target.value })}
-                onBlur={commitText}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") setEditing(null);
-                  else if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    commitText();
-                  }
-                }}
-              />
-            )}
-            <div className="page-bar">
-              <div className="page-tabs" role="tablist" aria-label="Pages">
-                {doc.pages.map((p) => (
-                  <button
-                    type="button"
-                    role="tab"
-                    key={p.id}
-                    aria-selected={p.index === page}
-                    className={p.background ? "background" : undefined}
-                    onClick={() => setPage(p.index)}
-                    title={p.background ? "Background page" : undefined}
-                  >
-                    {p.name}
-                  </button>
-                ))}
-              </div>
-              <div className="zoom">
-                <button type="button" onClick={() => stepZoom(-1)} title="Zoom out (Ctrl+-)" aria-label="Zoom out">
-                  −
-                </button>
-                <span className="zoom-pct">{Math.round((zoom / PX_PER_INCH) * 100)}%</span>
-                <button type="button" onClick={() => stepZoom(1)} title="Zoom in (Ctrl++)" aria-label="Zoom in">
-                  +
-                </button>
-                <button type="button" onClick={() => canvas.current?.fit()} title="Fit page (Ctrl+Shift+W)">
-                  Fit
-                </button>
-              </div>
+          <div className="stage">
+            <div className="canvas-wrap">
+              {dl ? (
+                <CanvasView
+                  ref={canvas}
+                  dl={dl}
+                  tool={tool}
+                  selection={selection}
+                  onSelection={setSelection}
+                  onCommand={(c) => {
+                    // Back to the pointer as soon as a shape is drawn (not when the
+                    // engine replies, which could undo a tool picked meanwhile).
+                    if (c.kind === "addShape") setTool("select");
+                    void exec(c);
+                  }}
+                  onEditText={editText}
+                  onZoomChange={setZoom}
+                />
+              ) : (
+                <div className="stage-empty">{doc.pages.length === 0 ? "This file has no drawing pages." : "Loading page…"}</div>
+              )}
+              {editing && (
+                <textarea
+                  className="text-editor"
+                  autoFocus
+                  value={editing.text}
+                  style={{
+                    left: editing.rect[0],
+                    top: editing.rect[1],
+                    width: Math.max(80, editing.rect[2]),
+                    height: Math.max(32, editing.rect[3]),
+                  }}
+                  onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+                  onBlur={commitText}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setEditing(null);
+                    else if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      commitText();
+                    }
+                  }}
+                />
+              )}
+              {tool !== "select" && (
+                <div className="tool-hint">
+                  Drag to draw a {TOOLS.find((t) => t.tool === tool)?.label.toLowerCase()} · <kbd>Esc</kbd> to cancel
+                </div>
+              )}
             </div>
+            {inspector && dl && (
+              <Inspector
+                dl={dl}
+                info={doc.info}
+                selection={selection}
+                onCommand={(c) => void exec(c)}
+                onTitle={(v) => void exec({ kind: "setDocProp", key: "title", value: v })}
+                onDelete={deleteSelection}
+              />
+            )}
           </div>
         )}
       </main>
 
-      <footer className="status">
-        <span>{inTauri ? "Desktop" : "Browser"}</span>
-        {dl && (
-          <span>
-            {dl.page.name}: {dl.page.width.toFixed(2)} × {dl.page.height.toFixed(2)} in, {dl.items.length} items
-          </span>
-        )}
-        {sync && <span>{sync === "local" ? "Local document" : sync}</span>}
-        {savedAs && <span>Saved as {savedAs}</span>}
-        {undo.labels[0] && <span>Undo: {undo.labels[0]}</span>}
-        {dl && dl.warnings.length > 0 && <span title={dl.warnings.join("\n")}>{dl.warnings.length} warnings</span>}
-        {hash && <span title="Derived-state determinism hash">State hash {hash}</span>}
-      </footer>
-    </div>
-  );
-}
+      {doc && (
+        <footer className="statusbar">
+          <div className="page-tabs" role="tablist" aria-label="Pages">
+            {doc.pages.map((p) => (
+              <button
+                type="button"
+                role="tab"
+                key={p.id}
+                aria-selected={p.index === page}
+                className={p.background ? "background" : undefined}
+                onClick={() => {
+                  setPage(p.index);
+                  setMode("drawing");
+                }}
+                title={p.background ? "Background page" : undefined}
+              >
+                <Icon name="page" size={14} />
+                {p.name}
+              </button>
+            ))}
+          </div>
+          <div className="status-items">
+            {selection.length > 0 && <span>{selection.length === 1 ? "1 shape selected" : `${selection.length} shapes selected`}</span>}
+            {dl && (
+              <span>
+                {dl.page.width.toFixed(2)} × {dl.page.height.toFixed(2)} in
+              </span>
+            )}
+            {dl && dl.warnings.length > 0 && (
+              <span className="warn" title={dl.warnings.join("\n")}>
+                {dl.warnings.length} warnings
+              </span>
+            )}
+            <span>{sync === "local" || !sync ? "Local" : sync}</span>
+            <span className="muted-mono" title="Derived-state determinism hash">
+              {inTauri ? "Desktop" : "Browser"}
+              {hash ? ` · ${hash.slice(0, 8)}` : ""}
+            </span>
+          </div>
+        </footer>
+      )}
 
-function TitleField({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
-  const [draft, setDraft] = useState(value);
-  const commit = () => {
-    if (draft !== value) onCommit(draft);
-  };
-  return (
-    <label className="title-field">
-      <span>Title</span>
-      <input
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-      />
-    </label>
+      {dialog === "shortcuts" && <ShortcutsDialog onClose={() => setDialog(null)} />}
+      {dialog === "about" && <AboutDialog onClose={() => setDialog(null)} />}
+    </div>
   );
 }

@@ -138,7 +138,8 @@ export interface Overlay {
   marquee?: [number, number, number, number];
 }
 
-const ACCENT = "#1a73e8";
+/** Selection colour: the brand accent, readable on light and dark pages. */
+const ACCENT = "#0d8a7a";
 
 export function drawOverlay(ctx: CanvasRenderingContext2D, view: View, dpr: number, pageHeight: number, o: Overlay) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -153,12 +154,16 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, view: View, dpr: numb
     ctx.stroke();
   }
   ctx.setLineDash([]);
+  ctx.lineWidth = 1.5;
   for (const h of o.handles) {
     const [x, y] = s(h);
+    ctx.beginPath();
+    ctx.roundRect(x - 4, y - 4, 8, 8, 2);
     ctx.fillStyle = "#ffffff";
-    ctx.fillRect(x - 4, y - 4, 8, 8);
-    ctx.strokeRect(x - 4, y - 4, 8, 8);
+    ctx.fill();
+    ctx.stroke();
   }
+  ctx.lineWidth = 1;
   if (o.preview) {
     const pts = o.preview.pts.map(s);
     ctx.beginPath();
@@ -176,7 +181,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, view: View, dpr: numb
   }
   if (o.marquee) {
     const [x0, y0, x1, y1] = o.marquee;
-    ctx.fillStyle = "rgba(26, 115, 232, 0.08)";
+    ctx.fillStyle = "rgba(13, 138, 122, 0.08)";
     ctx.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
     ctx.strokeRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
   }
