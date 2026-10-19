@@ -23,3 +23,8 @@ pub fn page_key(page_id: &str) -> String {
 pub fn shapes_tree_key(page_id: &str) -> String {
     format!("shapes/{page_id}")
 }
+
+/// A master's shape tree.
+pub fn master_tree_key(master_id: &str) -> String {
+    format!("mshapes/{master_id}")
+}

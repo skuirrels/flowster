@@ -72,6 +72,15 @@ impl Engine {
             .map(|p| PartEntry { name: &p.name, content_type: p.content_type.as_deref(), size: p.size })
             .collect();
         doc.import_package(file_name, &format, &entries);
+        // The CRDT is the source of truth (SPEC §20.6): write the drawing into
+        // it and render what reads back.
+        let model = model.map(|m| {
+            let theme = flowster_vsdx::visio::theme_xml(&pkg);
+            doc.import_model(&m, theme.as_deref(), flowster_crdt::model_io::seed_of(bytes));
+            let mut back = doc.read_model(flowster_vsdx::visio::parse_theme_xml);
+            back.warnings = m.warnings;
+            back
+        });
 
         self.next_doc += 1;
         let doc_id = format!("doc-{}", self.next_doc);
@@ -108,6 +117,7 @@ impl Engine {
                         "fileName": d.file_name,
                         "meta": d.doc.meta(),
                         "unknownParts": d.doc.unknown_count(),
+                        "shapes": d.doc.shape_count(),
                         "snapshotBytes": d.doc.snapshot().len(),
                     }),
                     Query::DerivedStateHash => {
@@ -183,6 +193,8 @@ mod tests {
         assert!(matches!(ev[1], EngineEvent::UndoState { can_undo: true, .. }));
         let ev = e.handle(4, EngineRequest::Query { doc: doc.clone(), q: Query::DocInfo });
         assert_eq!(reply(&ev)["meta"]["title"], "T");
+        // The drawing lives in the CRDT: the fixture's one shape.
+        assert_eq!(reply(&ev)["shapes"], 1);
 
         let ev = e.handle(5, EngineRequest::Close { doc: doc.clone() });
         assert_eq!(reply(&ev), &Value::Null);

@@ -4,6 +4,7 @@
 //! * `flowster export <file> <out.svg|.png|.pdf|.json> [--page N] [--dpi D]`: render a page
 //!   (PDF: every foreground page unless --page is given) or dump its display list;
 //! * `flowster conform <dir> [--diff out] [--json]`: SSIM of every corpus page against the oracle's PNG;
+//! * `flowster crdt-check <files>`: import into the CRDT, reload from a snapshot, compare the model;
 //! * `flowster recalc-check <file> [--json]`: recompute every formula and compare with Visio's cached values;
 //! * `flowster determinism [--json]`: derived-state hash (compared against WASM in CI);
 //! * `flowster bench crdt [--shapes N] [--library loro|yrs|all] [--json]`: the CRDT spike;
@@ -65,6 +66,8 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Import drawings into the CRDT, reload them from a snapshot and check the model reads back unchanged.
+    CrdtCheck { files: Vec<PathBuf> },
     /// Print the derived-state determinism hash.
     Determinism {
         #[arg(long)]
@@ -122,6 +125,7 @@ fn main() -> Result<()> {
         Cmd::Export { file, out, page, dpi } => export(&file, &out, page, dpi),
         Cmd::RecalcCheck { file, json, show } => recalc_check(&file, json, show),
         Cmd::Conform { dir, threshold, diff, json } => conform(&dir, threshold, diff.as_ref(), json),
+        Cmd::CrdtCheck { files } => crdt_check(&files),
         Cmd::Determinism { json } => {
             let r = flowster_core::determinism::default_report();
             if json {
@@ -345,6 +349,106 @@ fn conform(dir: &PathBuf, threshold: f64, diff: Option<&PathBuf>, json: bool) ->
     }
     let pct = if scores.is_empty() { 0.0 } else { passed as f64 * 100.0 / scores.len() as f64 };
     println!("{passed}/{} pages at SSIM ≥ {threshold} ({pct:.0}%)", scores.len());
+    Ok(())
+}
+
+/// The first place two models differ, for `crdt-check` reports.
+fn first_difference(a: &flowster_core::model::Document, b: &flowster_core::model::Document) -> Option<String> {
+    use flowster_core::model::Shape;
+    fn shapes(a: &[Shape], b: &[Shape], at: &str) -> Option<String> {
+        if a.len() != b.len() {
+            return Some(format!("{at}: {} shapes vs {}", a.len(), b.len()));
+        }
+        for (x, y) in a.iter().zip(b) {
+            if x != y {
+                let inner = shapes(&x.shapes, &y.shapes, &format!("{at} shape {}", x.id));
+                return inner.or_else(|| {
+                    let field = if x.sheet != y.sheet {
+                        "sheet"
+                    } else if x.text != y.text {
+                        "text"
+                    } else {
+                        "props"
+                    };
+                    Some(format!("{at} shape {} {field}", x.id))
+                });
+            }
+        }
+        None
+    }
+    if a.pages.len() != b.pages.len() {
+        return Some(format!("{} pages vs {}", a.pages.len(), b.pages.len()));
+    }
+    for (x, y) in a.pages.iter().zip(&b.pages) {
+        if x != y {
+            let at = format!("page {}", x.id);
+            return shapes(&x.shapes, &y.shapes, &at).or(Some(format!("{at} props/sheet/connects")));
+        }
+    }
+    for (id, m) in &a.masters {
+        let Some(n) = b.masters.get(id) else { return Some(format!("master {id} missing")) };
+        if m != n {
+            return shapes(&m.shapes, &n.shapes, &format!("master {id}")).or(Some(format!("master {id} props")));
+        }
+    }
+    let parts = [
+        ("masters", a.masters.len() != b.masters.len()),
+        ("styles", a.styles != b.styles),
+        ("colors", a.colors != b.colors),
+        ("default styles", a.default_styles != b.default_styles),
+        ("theme", a.theme != b.theme),
+        ("media", a.media != b.media),
+    ];
+    parts.iter().find(|(_, differs)| *differs).map(|(what, _)| (*what).to_owned())
+}
+
+fn crdt_check(files: &[PathBuf]) -> Result<()> {
+    use flowster_crdt::document::Document;
+    use flowster_crdt::model_io::{canonical_model, seed_of};
+    let mut failed = 0;
+    for file in files {
+        let bytes = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
+        let pkg =
+            flowster_vsdx::OpcPackage::open(bytes.clone()).with_context(|| format!("opening {}", file.display()))?;
+        let model = flowster_vsdx::visio::read_document(&pkg)?;
+        let theme = flowster_vsdx::visio::theme_xml(&pkg);
+        let parse = |b: &[u8]| flowster_vsdx::visio::parse_theme_xml(b);
+        let t0 = Instant::now();
+        let mut doc = Document::new();
+        doc.import_model(&model, theme.as_deref(), seed_of(&bytes));
+        let import_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let snapshot = doc.snapshot();
+        let t1 = Instant::now();
+        let copy = Document::from_snapshot(&snapshot, doc.assets().clone()).map_err(anyhow::Error::msg)?;
+        let back = copy.read_model(parse);
+        let read_ms = t1.elapsed().as_secs_f64() * 1000.0;
+        let expected = canonical_model(&model);
+        fn count(s: &[flowster_core::model::Shape]) -> usize {
+            s.iter().map(|x| 1 + count(&x.shapes)).sum()
+        }
+        let shapes: usize = model.pages.iter().map(|p| count(&p.shapes)).sum::<usize>()
+            + model.masters.values().map(|m| count(&m.shapes)).sum::<usize>();
+        let verdict = match first_difference(&expected, &back) {
+            None if expected == back => "ok".to_owned(),
+            None => "DIFF (unlocated)".to_owned(),
+            Some(at) => format!("DIFF at {at}"),
+        };
+        if verdict != "ok" {
+            failed += 1;
+        }
+        println!(
+            "{:<40} {} pages, {} shapes, snapshot {:.1} KB, import {:.1} ms, reload+read {:.1} ms: {verdict}",
+            file.display(),
+            model.pages.len(),
+            shapes,
+            snapshot.len() as f64 / 1024.0,
+            import_ms,
+            read_ms
+        );
+    }
+    if failed > 0 {
+        bail!("{failed} of {} files did not round-trip", files.len());
+    }
     Ok(())
 }
 

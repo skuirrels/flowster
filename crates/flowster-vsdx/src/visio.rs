@@ -20,6 +20,18 @@ const REL_THEME: &str = "http://schemas.openxmlformats.org/officeDocument/2006/r
 /// Media larger than this stay unloaded (drawn as a placeholder).
 const MAX_MEDIA_BYTES: u64 = 32 << 20;
 
+/// The raw theme part of a drawing, kept as an asset so a document stored in
+/// the CRDT can re-read it (`themes` holds the part whole, SPEC §20.3).
+pub fn theme_xml(pkg: &OpcPackage) -> Option<Vec<u8>> {
+    let main = pkg.info.main_part.clone()?;
+    pkg.read_part(&pkg.target_of_type(&main, REL_THEME)?).ok()
+}
+
+/// Parses a theme part read by [`theme_xml`].
+pub fn parse_theme_xml(bytes: &[u8]) -> Option<flowster_core::theme::Theme> {
+    dom::parse(bytes, "/visio/theme/theme1.xml").ok().map(|root| crate::theme::parse_theme(&root))
+}
+
 /// Reads the Visio document model from an opened package.
 pub fn read_document(pkg: &OpcPackage) -> Result<Document, OpcError> {
     let main = pkg.info.main_part.clone().ok_or_else(|| OpcError::NotVisio("no Visio document part".into()))?;

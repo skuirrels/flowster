@@ -1300,6 +1300,7 @@ name = "flowster-crdt"
 version = "0.0.1"
 dependencies = [
  "flowster-core",
+ "flowster-vsdx",
  "loro",
  "pest",
  "serde",
