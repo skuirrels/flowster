@@ -38,6 +38,129 @@ function Set-CharProp($chars, [int]$prop, $value) {
   [void]$chars.GetType().InvokeMember("CharProps", [Reflection.BindingFlags]::SetProperty, $null, $chars, @($prop, $value))
 }
 
+function New-TestEmf([string]$path) {
+  # A 400 x 300 px metafile of plain GDI records (EmfOnly: no EMF+ records).
+  Add-Type -AssemblyName System.Drawing
+  if (Test-Path $path) { Remove-Item $path }
+  $ref = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero)
+  $hdc = $ref.GetHdc()
+  $frame = New-Object System.Drawing.RectangleF 0, 0, 400, 300
+  $mf = New-Object System.Drawing.Imaging.Metafile $path, $hdc, $frame, ([System.Drawing.Imaging.MetafileFrameUnit]::Pixel), ([System.Drawing.Imaging.EmfType]::EmfOnly)
+  $ref.ReleaseHdc($hdc)
+  $ref.Dispose()
+  $g = [System.Drawing.Graphics]::FromImage($mf)
+  $black = New-Object System.Drawing.Pen ([System.Drawing.Color]::Black), 3
+  $g.FillRectangle((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(68, 114, 196))), 10, 10, 150, 90)
+  $g.DrawRectangle($black, 10, 10, 150, 90)
+  $g.FillEllipse((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(192, 0, 0))), 190, 15, 120, 80)
+  $green = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(0, 150, 60)), 5
+  $g.DrawLines($green, [System.Drawing.Point[]]@((New-Object System.Drawing.Point 20, 140), (New-Object System.Drawing.Point 80, 200), (New-Object System.Drawing.Point 140, 130), (New-Object System.Drawing.Point 200, 210)))
+  $star = [System.Drawing.Point[]]@((New-Object System.Drawing.Point 300, 120), (New-Object System.Drawing.Point 320, 170), (New-Object System.Drawing.Point 375, 170), (New-Object System.Drawing.Point 330, 200), (New-Object System.Drawing.Point 345, 255), (New-Object System.Drawing.Point 300, 220), (New-Object System.Drawing.Point 255, 255), (New-Object System.Drawing.Point 270, 200), (New-Object System.Drawing.Point 225, 170), (New-Object System.Drawing.Point 280, 170))
+  $g.FillPolygon((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 192, 0))), $star)
+  $g.DrawPolygon((New-Object System.Drawing.Pen ([System.Drawing.Color]::Black), 1), $star)
+  $g.DrawBezier((New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(112, 48, 160)), 4), 20, 280, 80, 220, 140, 300, 200, 240)
+  $dash = New-Object System.Drawing.Pen ([System.Drawing.Color]::Black), 2
+  $dash.DashStyle = [System.Drawing.Drawing2D.DashStyle]::Dash
+  $g.DrawLine($dash, 210, 285, 390, 285)
+  $font = New-Object System.Drawing.Font "Arial", 20, ([System.Drawing.FontStyle]::Regular), ([System.Drawing.GraphicsUnit]::Pixel)
+  $g.DrawString("EMF text", $font, [System.Drawing.Brushes]::Black, 200, 100)
+  $state = $g.Save()
+  $g.TranslateTransform(120, 250)
+  $g.RotateTransform(-30)
+  $g.FillRectangle((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(112, 173, 71))), -30, -12, 60, 24)
+  $g.Restore($state)
+  $bmp = New-Object System.Drawing.Bitmap 16, 16
+  for ($y = 0; $y -lt 16; $y++) { for ($x = 0; $x -lt 16; $x++) {
+    $c = if ((($x -shr 2) + ($y -shr 2)) % 2 -eq 0) { [System.Drawing.Color]::Black } else { [System.Drawing.Color]::White }
+    $bmp.SetPixel($x, $y, $c)
+  } }
+  $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
+  $g.DrawImage($bmp, 345, 15, 48, 48)
+  $g.Dispose()
+  $mf.Dispose()
+}
+
+function New-TestEmfGdi([string]$path) {
+  # Classic GDI records through P/Invoke: MM_ANISOTROPIC mapping, RECTANGLE,
+  # ELLIPSE, ROUNDRECT, ARC/PIE/CHORD, MOVETO/LINETO, CREATEPEN, TEXTOUT.
+  if (-not ("FlowsterGdi" -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class FlowsterGdi {
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+  [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr CreateEnhMetaFileW(IntPtr hdc, string file, ref RECT frame, string desc);
+  [DllImport("gdi32.dll")] public static extern IntPtr CloseEnhMetaFile(IntPtr hdc);
+  [DllImport("gdi32.dll")] public static extern bool DeleteEnhMetaFile(IntPtr h);
+  [DllImport("gdi32.dll")] public static extern int SetMapMode(IntPtr hdc, int mode);
+  [DllImport("gdi32.dll")] public static extern bool SetWindowExtEx(IntPtr hdc, int x, int y, IntPtr old);
+  [DllImport("gdi32.dll")] public static extern bool SetViewportExtEx(IntPtr hdc, int x, int y, IntPtr old);
+  [DllImport("gdi32.dll")] public static extern int GetDeviceCaps(IntPtr hdc, int index);
+  [DllImport("gdi32.dll")] public static extern IntPtr CreatePen(int style, int width, int color);
+  [DllImport("gdi32.dll")] public static extern IntPtr CreateSolidBrush(int color);
+  [DllImport("gdi32.dll")] public static extern IntPtr GetStockObject(int i);
+  [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
+  [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
+  [DllImport("gdi32.dll")] public static extern bool Rectangle(IntPtr hdc, int l, int t, int r, int b);
+  [DllImport("gdi32.dll")] public static extern bool Ellipse(IntPtr hdc, int l, int t, int r, int b);
+  [DllImport("gdi32.dll")] public static extern bool RoundRect(IntPtr hdc, int l, int t, int r, int b, int w, int h);
+  [DllImport("gdi32.dll")] public static extern bool Arc(IntPtr hdc, int l, int t, int r, int b, int x1, int y1, int x2, int y2);
+  [DllImport("gdi32.dll")] public static extern bool Pie(IntPtr hdc, int l, int t, int r, int b, int x1, int y1, int x2, int y2);
+  [DllImport("gdi32.dll")] public static extern bool Chord(IntPtr hdc, int l, int t, int r, int b, int x1, int y1, int x2, int y2);
+  [DllImport("gdi32.dll")] public static extern bool MoveToEx(IntPtr hdc, int x, int y, IntPtr old);
+  [DllImport("gdi32.dll")] public static extern bool LineTo(IntPtr hdc, int x, int y);
+  [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr CreateFontW(int h, int w, int esc, int orient, int weight, int italic, int underline, int strike, int charset, int outPrec, int clipPrec, int quality, int pitch, string face);
+  [DllImport("gdi32.dll")] public static extern int SetTextColor(IntPtr hdc, int color);
+  [DllImport("gdi32.dll")] public static extern int SetBkMode(IntPtr hdc, int mode);
+  [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] public static extern bool TextOutW(IntPtr hdc, int x, int y, string s, int n);
+  [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hwnd);
+  [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hwnd, IntPtr hdc);
+}
+"@
+  }
+  if (Test-Path $path) { Remove-Item $path }
+  $G = [FlowsterGdi]
+  $screen = $G::GetDC([IntPtr]::Zero)
+  $pxPerMm = $G::GetDeviceCaps($screen, 8) / $G::GetDeviceCaps($screen, 4)
+  # 100 mm x 75 mm picture with a 1000 x 750 logical grid.
+  $frame = New-Object FlowsterGdi+RECT
+  $frame.R = 10000; $frame.B = 7500
+  $dc = $G::CreateEnhMetaFileW($screen, $path, [ref]$frame, "Flowster GDI test")
+  [void]$G::ReleaseDC([IntPtr]::Zero, $screen)
+  [void]$G::SetMapMode($dc, 8)
+  [void]$G::SetWindowExtEx($dc, 1000, 750, [IntPtr]::Zero)
+  [void]$G::SetViewportExtEx($dc, [int](100 * $pxPerMm), [int](75 * $pxPerMm), [IntPtr]::Zero)
+  $rgb = { param($r, $g, $b) $r + 256 * $g + 65536 * $b }
+  $pen = $G::CreatePen(0, 8, (& $rgb 0 0 0))
+  $old = $G::SelectObject($dc, $pen)
+  $brush = $G::CreateSolidBrush((& $rgb 91 155 213))
+  [void]$G::SelectObject($dc, $brush)
+  [void]$G::Rectangle($dc, 30, 30, 330, 230)
+  $brush2 = $G::CreateSolidBrush((& $rgb 237 125 49))
+  [void]$G::SelectObject($dc, $brush2)
+  [void]$G::Ellipse($dc, 370, 30, 650, 230)
+  [void]$G::RoundRect($dc, 690, 30, 970, 230, 80, 80)
+  $null_brush = $G::GetStockObject(5)
+  [void]$G::SelectObject($dc, $null_brush)
+  [void]$G::Arc($dc, 30, 280, 330, 520, 330, 400, 180, 280)
+  [void]$G::SelectObject($dc, $brush)
+  [void]$G::Pie($dc, 370, 280, 650, 520, 650, 400, 510, 280)
+  [void]$G::Chord($dc, 690, 280, 970, 520, 970, 400, 690, 400)
+  $red = $G::CreatePen(0, 12, (& $rgb 192 0 0))
+  [void]$G::SelectObject($dc, $red)
+  [void]$G::MoveToEx($dc, 30, 720, [IntPtr]::Zero)
+  [void]$G::LineTo($dc, 330, 580)
+  [void]$G::LineTo($dc, 630, 720)
+  $font = $G::CreateFontW(-60, 0, 0, 0, 700, 0, 0, 0, 0, 0, 0, 0, 0, "Arial")
+  [void]$G::SelectObject($dc, $font)
+  [void]$G::SetBkMode($dc, 1)
+  [void]$G::SetTextColor($dc, (& $rgb 0 0 0))
+  [void]$G::TextOutW($dc, 680, 600, "GDI text", 8)
+  [void]$G::SelectObject($dc, $old)
+  foreach ($o in $pen, $brush, $brush2, $red, $font) { [void]$G::DeleteObject($o) }
+  [void]$G::DeleteEnhMetaFile($G::CloseEnhMetaFile($dc))
+}
+
 function Export-Doc($doc, [string]$name) {
   $path = Join-Path $OutDir "$name.vsdx"
   if (Test-Path $path) { Remove-Item $path }
@@ -528,6 +651,31 @@ try {
   Set-Formula $bar "LinePattern" "0"
   Set-Formula $bar "FillForegnd" "RGB(0,0,0)"
   Export-Doc $doc "fonts"
+  $doc.Close()
+
+  # ------------------------------------------------------------------ emf.vsdx
+  # Our own EMF (GDI records only), drawn with System.Drawing, imported twice:
+  # at its natural size and stretched.
+  $emf = Join-Path $OutDir "flowster-test.emf"
+  New-TestEmf $emf
+  $doc = $app.Documents.Add("")
+  $page = $doc.Pages.Item(1)
+  Set-Formula $page.PageSheet "PageWidth" "11 in"
+  Set-Formula $page.PageSheet "PageHeight" "8.5 in"
+  $a = $page.Import($emf)
+  Set-Formula $a "PinX" "3 in"
+  Set-Formula $a "PinY" "5.5 in"
+  $b = $page.Import($emf)
+  Set-Formula $b "PinX" "8 in"
+  Set-Formula $b "PinY" "3 in"
+  Set-Formula $b "Width" "4 in"
+  Set-Formula $b "Height" "2 in"
+  $gdi = Join-Path $OutDir "flowster-gdi.emf"
+  New-TestEmfGdi $gdi
+  $c = $page.Import($gdi)
+  Set-Formula $c "PinX" "3 in"
+  Set-Formula $c "PinY" "1.8 in"
+  Export-Doc $doc "emf"
   $doc.Close()
 }
 finally {

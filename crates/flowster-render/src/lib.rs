@@ -10,6 +10,7 @@
 #![forbid(unsafe_code)]
 
 pub mod arrows;
+pub mod emf;
 pub mod paint;
 pub mod svg;
 pub mod text_layout;
@@ -754,15 +755,32 @@ impl<'d> Builder<'d> {
         let Some(fd) = r.foreign() else { return };
         let media = fd.part.as_deref().and_then(|p| self.doc.media.get(p));
         let mime = media.map(|m| m.content_type.clone()).unwrap_or_else(|| "application/octet-stream".into());
+        let (x, y) = (r.num("ImgOffsetX").unwrap_or(0.0), r.num("ImgOffsetY").unwrap_or(0.0));
+        let (iw, ih) = (r.num("ImgWidth").unwrap_or(w), r.num("ImgHeight").unwrap_or(h));
+        // Metafiles become vectors: the header frame (in reference-device
+        // pixels, y down) fills the image rectangle.
+        if let Some(m) = media
+            && let Some(hd) = emf::header(&m.bytes)
+        {
+            let [fx0, fy0, fx1, fy1] = hd.frame;
+            let (fw, fh) = ((fx1 - fx0).abs().max(1e-9), (fy1 - fy0).abs().max(1e-9));
+            let to_page = world
+                .then(Affine::translate(x, y + ih))
+                .then(Affine::scale(iw / fw, -ih / fh))
+                .then(Affine::translate(-fx0, -fy0));
+            if emf::render(&m.bytes, r.shape().id, to_page, &mut self.items) {
+                return;
+            }
+        }
         let displayable =
             matches!(mime.as_str(), "image/png" | "image/jpeg" | "image/gif" | "image/bmp" | "image/svg+xml");
         self.items.push(Item::Image {
             shape: r.shape().id,
             transform: world,
-            x: r.num("ImgOffsetX").unwrap_or(0.0),
-            y: r.num("ImgOffsetY").unwrap_or(0.0),
-            w: r.num("ImgWidth").unwrap_or(w),
-            h: r.num("ImgHeight").unwrap_or(h),
+            x,
+            y,
+            w: iw,
+            h: ih,
             data: media.filter(|_| displayable).map(|m| base64::engine::general_purpose::STANDARD.encode(&m.bytes)),
             mime,
         });
