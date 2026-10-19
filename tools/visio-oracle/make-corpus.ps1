@@ -475,6 +475,30 @@ try {
   Set-Formula $tr "LinePattern" "2"
   Export-Doc $doc "lines"
   $doc.Close()
+
+  # --------------------------------------------------------------- arrows.vsdx
+  # EndArrow 1-45 (rows) at EndArrowSize 0-6 on 1 pt lines, then size 2 on
+  # 3 pt and 6 pt lines (columns), and a bar fixing the scale.
+  $doc = $app.Documents.Add("")
+  $page = $doc.Pages.Item(1)
+  Set-Formula $page.PageSheet "PageWidth" "18 in"
+  Set-Formula $page.PageSheet "PageHeight" "28 in"
+  $cols = @(@(0, "1 pt"), @(1, "1 pt"), @(2, "1 pt"), @(3, "1 pt"), @(4, "1 pt"), @(5, "1 pt"), @(6, "1 pt"), @(2, "3 pt"), @(2, "6 pt"))
+  for ($t = 1; $t -le 45; $t++) {
+    $y = 27.5 - 0.6 * ($t - 1)
+    for ($c = 0; $c -lt $cols.Count; $c++) {
+      $x = 0.5 + 1.9 * $c
+      $l = $page.DrawLine($x, $y, $x + 1.5, $y)
+      Set-Formula $l "EndArrow" "$t"
+      Set-Formula $l "EndArrowSize" "$($cols[$c][0])"
+      Set-Formula $l "LineWeight" $cols[$c][1]
+    }
+  }
+  $bar = $page.DrawRectangle(0.5, 0.2, 17.5, 0.3)
+  Set-Formula $bar "LinePattern" "0"
+  Set-Formula $bar "FillForegnd" "RGB(0,0,0)"
+  Export-Doc $doc "arrows"
+  $doc.Close()
 }
 finally {
   $app.Quit()

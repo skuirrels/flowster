@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod arrows;
 pub mod paint;
 pub mod svg;
 pub mod text_layout;
@@ -22,7 +23,7 @@ use flowster_core::resolve::{Lookup, MergedSection, Resolved};
 use flowster_core::theme::{EMU_PER_INCH, FillStyle, FontStyle, LineStyle, Slot, StyleSet, Theme};
 use flowster_core::transform::Affine;
 use flowster_core::value::{Rgba, parse_color, parse_num};
-use libm::{atan2, cos, hypot, sin};
+use libm::{cos, hypot, sin};
 pub use paint::{Paint, Stop};
 use serde::Serialize;
 
@@ -719,51 +720,31 @@ impl<'d> Builder<'d> {
                 (tip, from, n)
             };
             let len_dir = hypot(tip.0 - from.0, tip.1 - from.1);
+            let Some(head) = arrows::head(kind) else { continue };
             if len_dir < 1e-9 {
                 continue;
             }
-            let scale = [0.5, 0.75, 1.0, 1.4, 1.9, 2.6, 4.0][size.clamp(0.0, 6.0) as usize];
-            let len = scale * (0.06 + 5.0 * stroke.width);
-            let half = len * 0.33;
-            let ang = atan2(tip.1 - from.1, tip.0 - from.0);
-            let (c, s) = (cos(ang), sin(ang));
-            let base = (tip.0 - c * len, tip.1 - s * len);
-            let left = (base.0 - s * half, base.1 + c * half);
-            let right = (base.0 + s * half, base.1 - c * half);
-            let open = kind == 1;
-            if open {
-                out.push(Item::Path {
-                    shape: r.shape().id,
-                    d: vec![
-                        Seg::M { x: left.0, y: left.1 },
-                        Seg::L { x: tip.0, y: tip.1 },
-                        Seg::L { x: right.0, y: right.1 },
-                    ],
-                    fill: None,
-                    stroke: Some(Stroke { dash: Vec::new(), ..stroke.clone() }),
-                    blur: 0.0,
-                });
-            } else {
-                // Stop the line inside the head so thick lines do not poke past the tip.
-                let back = (tip.0 - c * len * 0.8, tip.1 - s * len * 0.8);
+            let u = arrows::unit(size, stroke.width);
+            let (c, s) = ((tip.0 - from.0) / len_dir, (tip.1 - from.1) / len_dir);
+            // Head frame: +X out of the line, +Y to its left, in head units.
+            let place = |(x, y): (f64, f64)| (tip.0 + u * (x * c - y * s), tip.1 + u * (x * s + y * c));
+            if head.trim > 0.0 {
+                let back = place((-head.trim, 0.0));
                 d[idx] = match d[idx] {
                     Seg::M { .. } => Seg::M { x: back.0, y: back.1 },
                     Seg::L { .. } => Seg::L { x: back.0, y: back.1 },
                     Seg::C { x1, y1, x2, y2, .. } => Seg::C { x1, y1, x2, y2, x: back.0, y: back.1 },
                     Seg::Z => Seg::Z,
                 };
-                out.push(Item::Path {
-                    shape: r.shape().id,
-                    d: vec![
-                        Seg::M { x: tip.0, y: tip.1 },
-                        Seg::L { x: left.0, y: left.1 },
-                        Seg::L { x: right.0, y: right.1 },
-                        Seg::Z,
-                    ],
-                    fill: Some(Paint::Solid { color: stroke.color }),
-                    stroke: None,
-                    blur: 0.0,
-                });
+            }
+            let outline = Stroke { dash: Vec::new(), cap: "round", ..stroke.clone() };
+            for (style, local) in head.parts {
+                let d: Vec<Seg> = local.iter().map(|seg| seg.map(place)).collect();
+                let (fill, stroke) = match style {
+                    arrows::Style::Filled => (Some(Paint::Solid { color: stroke.color }), None),
+                    arrows::Style::Open | arrows::Style::Hollow => (None, Some(outline.clone())),
+                };
+                out.push(Item::Path { shape: r.shape().id, d, fill, stroke, blur: 0.0 });
             }
         }
         out
