@@ -38,6 +38,29 @@ fn path(segs: &[Seg]) -> Option<sk::Path> {
     pb.finish()
 }
 
+/// Per-pixel foreground coverage of a hatch tile. Visio draws the single-pixel
+/// diagonals (patterns 2 and 5) as anti-aliased lines: 0.92 on the line and
+/// 0.25 on each horizontal neighbour; every other tile is binary.
+fn hatch_coverage(bits: &[u8; 8]) -> [[f32; 8]; 8] {
+    let on = |row: usize, col: usize| bits[row % 8] & (0x80 >> (col % 8)) != 0;
+    // One bit per row, each row the previous one moved a column sideways.
+    let steps = |f: fn(u8, u32) -> u8| (0..8).all(|r| bits[(r + 1) % 8] == f(bits[r], 1));
+    let diagonal = bits.iter().all(|b| b.count_ones() == 1) && (steps(u8::rotate_left) || steps(u8::rotate_right));
+    std::array::from_fn(|r| {
+        std::array::from_fn(|c| match (on(r, c), diagonal) {
+            (true, true) => 0.92,
+            (true, false) => 1.0,
+            (false, true) if on(r, c + 1) || on(r, c + 7) => 0.25,
+            _ => 0.0,
+        })
+    })
+}
+
+fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
+    let m = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round() as u8;
+    Rgba(m(a.0, b.0), m(a.1, b.1), m(a.2, b.2), m(a.3, b.3))
+}
+
 fn stops(s: &[Stop]) -> Vec<sk::GradientStop> {
     s.iter().map(|st| sk::GradientStop::new(st.offset as f32, color(st.color))).collect()
 }
@@ -107,23 +130,18 @@ impl Raster {
                 );
                 set(gy, &mut self.pixmap, Some(&bow));
             }
-            Paint::Pattern { space, bits, fg, bg } => {
+            Paint::Pattern { bits, fg, bg, .. } => {
+                // Visio rasterises hatches at one bit per output pixel (the
+                // 8×8 tile repeats every 8 px at any export resolution).
                 let Some(mut tile) = sk::Pixmap::new(8, 8) else { return };
-                tile.fill(color(*bg));
-                for (row, b) in bits.iter().enumerate() {
-                    for col in 0..8u32 {
-                        if b & (0x80 >> col) != 0 {
-                            // Paint space is +Y up; store rows bottom-up.
-                            let r = sk::Rect::from_xywh(col as f32, (7 - row) as f32, 1.0, 1.0);
-                            if let Some(r) = r {
-                                let p = sk::Paint { shader: sk::Shader::SolidColor(color(*fg)), ..Default::default() };
-                                tile.fill_rect(r, &p, sk::Transform::identity(), None);
-                            }
-                        }
-                    }
+                let cov = hatch_coverage(bits);
+                for (i, px) in tile.pixels_mut().iter_mut().enumerate() {
+                    let c = mix(*bg, *fg, cov[i / 8][i % 8]);
+                    *px = color(c).premultiply().to_color_u8();
                 }
+                let device = self.page.invert().map_or(sk::Transform::identity(), |m| ts(&m));
                 let shader =
-                    sk::Pattern::new(tile.as_ref(), sk::SpreadMode::Repeat, sk::FilterQuality::Nearest, 1.0, ts(space));
+                    sk::Pattern::new(tile.as_ref(), sk::SpreadMode::Repeat, sk::FilterQuality::Nearest, 1.0, device);
                 paint.shader = shader;
                 self.pixmap.fill_path(&p, &paint, sk::FillRule::EvenOdd, page, mask);
             }
@@ -254,12 +272,19 @@ fn blur(pixmap: &mut sk::Pixmap, sigma: f64) {
 /// Renders a page at `dpi` pixels per inch. `layouts` are the text layouts
 /// indexed like `dl.items` (`None` skips that text).
 pub fn render(dl: &DisplayList, layouts: &[Option<TextLayout>], dpi: f64) -> Option<sk::Pixmap> {
-    let (pw, ph) = (dl.page.width, dl.page.height);
+    render_area(dl, layouts, dpi, [0.0, 0.0, dl.page.width, dl.page.height])
+}
+
+/// Renders the page region `[x0, y0, x1, y1]` (page inches, y up), such as
+/// [`DisplayList::extents`] for the whole drawing including off-page shapes.
+pub fn render_area(dl: &DisplayList, layouts: &[Option<TextLayout>], dpi: f64, area: [f64; 4]) -> Option<sk::Pixmap> {
+    let (pw, ph) = (area[2] - area[0], area[3] - area[1]);
     let dpi = dpi.min(MAX_SIDE / pw.max(ph).max(0.01));
     let (w, h) = ((pw * dpi).round().max(1.0) as u32, (ph * dpi).round().max(1.0) as u32);
     let mut pixmap = sk::Pixmap::new(w, h)?;
     pixmap.fill(sk::Color::WHITE);
-    let mut r = Raster { pixmap, page: Affine([dpi, 0.0, 0.0, -dpi, 0.0, ph * dpi]), glyphs: GlyphCache::default() };
+    let page = Affine([dpi, 0.0, 0.0, -dpi, -area[0] * dpi, area[3] * dpi]);
+    let mut r = Raster { pixmap, page, glyphs: GlyphCache::default() };
     for (i, item) in dl.items.iter().enumerate() {
         match item {
             Item::Path { d, fill, stroke, blur: b, .. } if *b > 0.0 => {
@@ -308,6 +333,17 @@ pub fn png(dl: &DisplayList, layouts: &[Option<TextLayout>], dpi: f64) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn single_pixel_diagonal_hatches_are_antialiased() {
+        let up = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80];
+        let c = hatch_coverage(&up);
+        assert_eq!((c[0][7], c[0][6], c[0][0], c[0][3]), (0.92, 0.25, 0.25, 0.0));
+        // Other tiles are binary.
+        let grid = [0xFF, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80];
+        let c = hatch_coverage(&grid);
+        assert!(c.iter().flatten().all(|v| *v == 0.0 || *v == 1.0));
+    }
 
     #[test]
     fn renders_the_fixture() {

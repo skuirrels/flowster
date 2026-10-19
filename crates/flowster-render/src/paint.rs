@@ -197,54 +197,35 @@ pub fn legacy_gradient(world: Affine, w: f64, h: f64, pattern: i64, fg: Rgba, bg
     })
 }
 
-/// 8 × 8 approximations of the hatch patterns 2–24 (row 0 at the top, bit 7 left).
+/// The 8 × 8 tiles of the hatch patterns 2–24 (row 0 at the top, bit 7 on the
+/// left), read off Visio's raster exports, where the tile is anchored at the
+/// image origin with one bit per pixel.
 fn pattern_bits(pattern: i64) -> Option<[u8; 8]> {
-    let diag_up = |step: usize| -> [u8; 8] {
-        let mut b = [0u8; 8];
-        for (r, row) in b.iter_mut().enumerate() {
-            for k in (0..8).step_by(step) {
-                *row |= 1 << ((r + k) % 8);
-            }
-        }
-        b
-    };
-    let diag_down = |step: usize| -> [u8; 8] {
-        let mut b = [0u8; 8];
-        for (r, row) in b.iter_mut().enumerate() {
-            for k in (0..8).step_by(step) {
-                *row |= 0x80 >> ((r + k) % 8);
-            }
-        }
-        b
-    };
-    let or = |a: [u8; 8], b: [u8; 8]| -> [u8; 8] { std::array::from_fn(|i| a[i] | b[i]) };
-    let rows =
-        |mask: u8, every: usize| -> [u8; 8] { std::array::from_fn(|i| if i % every == 0 { 0xFF } else { 0 } | mask) };
-    let cols = |c: u8| -> [u8; 8] { [c; 8] };
+    let repeat4 = |a: u8, b: u8, c: u8, d: u8| [a, b, c, d, a, b, c, d];
     Some(match pattern {
-        2 => diag_up(8),
-        3 => or(rows(0, 8), cols(0x80)),
-        4 => or(diag_up(8), diag_down(8)),
-        5 => diag_down(8),
-        6 => rows(0, 8),
-        7 => cols(0x80),
-        8 => [0x77, 0xDD, 0x77, 0xDD, 0x77, 0xDD, 0x77, 0xDD],
-        9 => [0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55],
-        10 => [0x88, 0x22, 0x88, 0x22, 0x88, 0x22, 0x88, 0x22],
-        11 => [0x80, 0x00, 0x08, 0x00, 0x80, 0x00, 0x08, 0x00],
-        12 => [0x80, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00],
-        13 => [0xFF, 0xFF, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00],
-        14 => cols(0xCC),
-        15 => diag_down(4),
-        16 => diag_up(4),
-        17 => or(diag_up(4), diag_down(4)),
-        18 => or(rows(0, 2), cols(0xAA)),
-        19 => rows(0, 4),
-        20 => cols(0x88),
-        21 => diag_down(4),
-        22 => diag_up(4),
-        23 => or(rows(0, 4), cols(0x88)),
-        24 => or(diag_up(2), diag_down(2)),
+        2 => [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80],
+        3 => [0xFF, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80],
+        4 => [0x82, 0x44, 0x28, 0x10, 0x28, 0x44, 0x82, 0x01],
+        5 => [0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01],
+        6 => [0xFF, 0, 0, 0, 0, 0, 0, 0],
+        7 => [0x80; 8],
+        8 => repeat4(0x77, 0xDD, 0x77, 0xDD),
+        9 => repeat4(0x55, 0xAA, 0x55, 0xAA),
+        10 => repeat4(0x88, 0x22, 0x88, 0x22),
+        11 => repeat4(0x88, 0x00, 0x22, 0x00),
+        12 => repeat4(0x10, 0x00, 0x01, 0x00),
+        13 => repeat4(0xFF, 0xFF, 0x00, 0x00),
+        14 => [0xCC; 8],
+        15 => repeat4(0xCC, 0x66, 0x33, 0x99),
+        16 => repeat4(0x33, 0x66, 0xCC, 0x99),
+        17 => repeat4(0x99, 0x66, 0x66, 0x99),
+        18 => repeat4(0xFF, 0x66, 0xFF, 0x99),
+        19 => repeat4(0xFF, 0x00, 0x00, 0x00),
+        20 => [0x88; 8],
+        21 => repeat4(0x88, 0x44, 0x22, 0x11),
+        22 => repeat4(0x11, 0x22, 0x44, 0x88),
+        23 => repeat4(0xFF, 0x88, 0x88, 0x88),
+        24 => repeat4(0xEE, 0x55, 0xBB, 0x55),
         _ => return None,
     })
 }

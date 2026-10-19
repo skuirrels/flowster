@@ -7,6 +7,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod compare;
 mod glyphs;
 pub mod pdf;
 pub mod png;

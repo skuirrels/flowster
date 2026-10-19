@@ -362,6 +362,119 @@ try {
   }
   Export-Doc $doc "gradients"
   $doc.Close()
+
+  # ----------------------------------------------------------------- text.vsdx
+  # Paragraph and vertical alignment, sizes, styles, fonts, spacing, indents,
+  # rotated text and text backgrounds.
+  $doc = $app.Documents.Add("")
+  $page = $doc.Pages.Item(1)
+  Set-Formula $page.PageSheet "PageWidth" "11 in"
+  Set-Formula $page.PageSheet "PageHeight" "8.5 in"
+  $long = "The quick brown fox jumps over the lazy dog, then naps in the sun."
+  for ($a = 0; $a -le 3; $a++) {
+    $x = 0.4 + 2.6 * $a
+    $s = $page.DrawRectangle($x, 6.9, $x + 2.3, 8.1)
+    $s.Text = $long
+    Set-Formula $s "Para.HorzAlign" "$a"
+  }
+  for ($v = 0; $v -le 2; $v++) {
+    $x = 0.4 + 2.0 * $v
+    $s = $page.DrawRectangle($x, 5.0, $x + 1.7, 6.4)
+    $s.Text = "VerticalAlign $v"
+    Set-Formula $s "VerticalAlign" "$v"
+  }
+  $rt = $page.DrawRectangle(6.6, 5.2, 8.4, 6.2)
+  $rt.Text = "Text at 30 degrees"
+  Set-Formula $rt "TxtAngle" "30 deg"
+  $bk = $page.DrawLine(8.8, 5.7, 10.6, 5.7)
+  $bk.Text = "Label on a line"
+  Set-Formula $bk "TextBkgnd" "RGB(255,230,153)"
+  $sizes = 8, 12, 18, 24, 36
+  for ($i = 0; $i -lt $sizes.Count; $i++) {
+    $x = 0.4 + 2.1 * $i
+    $s = $page.DrawRectangle($x, 3.4, $x + 1.9, 4.6)
+    $s.Text = "$($sizes[$i]) pt"
+    Set-Formula $s "Char.Size" "$($sizes[$i]) pt"
+  }
+  $styles = @(
+    @("Italic", "Char.Style", "2"), @("Underline", "Char.Style", "4"), @("Bold italic", "Char.Style", "3"),
+    @("Strikethrough", "Char.Strikethru", "TRUE"), @("Red text", "Char.Color", "RGB(192,0,0)")
+  )
+  for ($i = 0; $i -lt $styles.Count; $i++) {
+    $x = 0.4 + 2.1 * $i
+    $s = $page.DrawRectangle($x, 2.0, $x + 1.9, 3.0)
+    $s.Text = $styles[$i][0]
+    Set-Formula $s $styles[$i][1] $styles[$i][2]
+    Set-Formula $s "Char.Size" "14 pt"
+  }
+  $fonts = "Times New Roman", "Consolas", "Georgia"
+  for ($i = 0; $i -lt $fonts.Count; $i++) {
+    $x = 0.4 + 2.1 * $i
+    $s = $page.DrawRectangle($x, 0.3, $x + 1.9, 1.6)
+    $s.Text = "$($fonts[$i]) font"
+    Set-CharProp $s.Characters 0 $doc.Fonts.Item($fonts[$i]).ID
+    Set-Formula $s "Char.Size" "14 pt"
+  }
+  $pp = $page.DrawRectangle(6.7, 0.3, 10.6, 1.8)
+  $pp.Text = "First paragraph with a hanging indent that wraps.`nSecond paragraph after a gap."
+  Set-Formula $pp "Para.HorzAlign" "0"
+  Set-Formula $pp "Para.IndLeft" "0.25 in"
+  Set-Formula $pp "Para.IndFirst" "-0.2 in"
+  Set-Formula $pp "Para.SpBefore" "6 pt"
+  Set-Formula $pp "Para.SpLine" "-150%"
+  Export-Doc $doc "text"
+  $doc.Close()
+
+  # ---------------------------------------------------------------- lines.vsdx
+  # LinePattern 1-23, weights, caps, arrowheads 1-24 at three sizes, rounding
+  # and transparency. No text.
+  $doc = $app.Documents.Add("")
+  $page = $doc.Pages.Item(1)
+  Set-Formula $page.PageSheet "PageWidth" "11 in"
+  Set-Formula $page.PageSheet "PageHeight" "8.5 in"
+  for ($i = 1; $i -le 23; $i++) {
+    $y = 8.1 - 0.3 * ($i - 1)
+    $l = $page.DrawLine(0.4, $y, 3.4, $y)
+    Set-Formula $l "LinePattern" "$i"
+    Set-Formula $l "LineWeight" "1.5 pt"
+  }
+  $weights = "0.25 pt", "0.5 pt", "1 pt", "2 pt", "4 pt", "8 pt"
+  for ($i = 0; $i -lt $weights.Count; $i++) {
+    $y = 8.1 - 0.35 * $i
+    $l = $page.DrawLine(4.0, $y, 6.5, $y)
+    Set-Formula $l "LineWeight" $weights[$i]
+  }
+  for ($c = 0; $c -le 2; $c++) {
+    $y = 5.7 - 0.4 * $c
+    $l = $page.DrawLine(4.2, $y, 6.3, $y)
+    Set-Formula $l "LineWeight" "10 pt"
+    Set-Formula $l "LineCap" "$c"
+    Set-Formula $l "LineColor" "RGB(68,114,196)"
+  }
+  for ($i = 1; $i -le 24; $i++) {
+    $col = [math]::Floor(($i - 1) / 12)
+    $y = 8.1 - 0.32 * (($i - 1) % 12)
+    $x = 7.0 + 2.0 * $col
+    $l = $page.DrawLine($x, $y, $x + 1.6, $y)
+    Set-Formula $l "BeginArrow" "$i"
+    Set-Formula $l "EndArrow" "$i"
+    Set-Formula $l "BeginArrowSize" "$($i % 3)"
+    Set-Formula $l "EndArrowSize" "$(($i % 3) + 2)"
+    Set-Formula $l "LineWeight" "1 pt"
+  }
+  $rr = $page.DrawRectangle(0.5, 0.5, 2.5, 1.8)
+  Set-Formula $rr "Rounding" "0.25 in"
+  Set-Formula $rr "LineWeight" "2 pt"
+  $rp = $page.DrawPolyline([double[]](3.0, 0.5, 4.0, 1.8, 5.0, 0.5, 6.0, 1.8), 0)
+  Set-Formula $rp "Rounding" "0.2 in"
+  Set-Formula $rp "LineWeight" "2 pt"
+  $tr = $page.DrawRectangle(6.5, 0.5, 8.5, 1.8)
+  Set-Formula $tr "LineWeight" "6 pt"
+  Set-Formula $tr "LineColor" "RGB(192,0,0)"
+  Set-Formula $tr "LineColorTrans" "50%"
+  Set-Formula $tr "LinePattern" "2"
+  Export-Doc $doc "lines"
+  $doc.Close()
 }
 finally {
   $app.Quit()

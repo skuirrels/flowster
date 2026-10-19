@@ -47,6 +47,45 @@ pub struct DisplayList {
     pub warnings: Vec<String>,
 }
 
+impl DisplayList {
+    /// The drawing's extents in page inches, `[x0, y0, x1, y1]` (y up), which may
+    /// reach past the page: path control points and half the stroke width, text
+    /// blocks and image frames. `None` for an empty page.
+    pub fn extents(&self) -> Option<[f64; 4]> {
+        let mut b = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
+        let mut add = |(x, y): (f64, f64), pad: f64| {
+            b = [b[0].min(x - pad), b[1].min(y - pad), b[2].max(x + pad), b[3].max(y + pad)];
+        };
+        for item in &self.items {
+            match item {
+                Item::Path { d, stroke, blur, .. } => {
+                    let pad = stroke.as_ref().map_or(0.0, |s| s.width / 2.0) + blur;
+                    for s in d {
+                        if let Seg::C { x1, y1, x2, y2, .. } = *s {
+                            add((x1, y1), pad);
+                            add((x2, y2), pad);
+                        }
+                        if let Some(p) = s.end() {
+                            add(p, pad);
+                        }
+                    }
+                }
+                Item::Text { transform, width, height, .. } => {
+                    for p in [(0.0, 0.0), (*width, 0.0), (0.0, *height), (*width, *height)] {
+                        add(transform.apply(p), 0.0);
+                    }
+                }
+                Item::Image { transform, x, y, w, h, .. } => {
+                    for p in [(*x, *y), (x + w, *y), (*x, y + h), (x + w, y + h)] {
+                        add(transform.apply(p), 0.0);
+                    }
+                }
+            }
+        }
+        (b[0] <= b[2]).then_some(b)
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Stroke {
@@ -448,10 +487,13 @@ impl<'d> Builder<'d> {
                 color: color.with_transparency(self.num(r, "LineColorTrans", |_| None, 0.0)),
                 width: weight,
                 dash: dash_pattern(line_pattern, weight),
+                // 0 round, 1 flat at the end point, 2 square past it. Dashes
+                // always have flat ends.
                 cap: match self.num(r, "LineCap", |_| None, 0.0) as i64 {
-                    1 => "square",
-                    2 => "butt",
-                    _ => "round",
+                    _ if line_pattern >= 2.0 => "butt",
+                    0 => "round",
+                    2 => "square",
+                    _ => "butt",
                 },
             })
         } else {
@@ -881,34 +923,36 @@ impl<'d> Builder<'d> {
 }
 
 /// Dash lengths for the built-in line patterns, in multiples of the line weight
-/// (with a floor so hairlines still show their pattern).
+/// (with a floor so hairlines still show their pattern), measured from Visio's
+/// rendering at 1.5 pt and 6 pt. Visio draws dashes with flat ends whatever
+/// the line cap, so the lengths are exact.
 fn dash_pattern(pattern: f64, weight: f64) -> Vec<f64> {
     let unit = weight.max(0.01);
     let units: &[f64] = match pattern as i64 {
         0 | 1 => &[],
-        2 => &[6.0, 4.0],
-        3 => &[1.0, 3.0],
-        4 => &[6.0, 3.0, 1.0, 3.0],
-        5 => &[6.0, 3.0, 1.0, 3.0, 1.0, 3.0],
-        6 => &[12.0, 4.0],
-        7 => &[12.0, 4.0, 6.0, 4.0],
-        8 => &[12.0, 4.0, 6.0, 4.0, 6.0, 4.0],
-        9 => &[3.0, 2.0],
+        2 => &[8.0, 4.0],
+        3 => &[1.0, 4.0],
+        4 => &[8.0, 4.0, 1.0, 4.0],
+        5 => &[8.0, 4.0, 1.0, 4.0, 1.0, 4.0],
+        6 => &[8.0, 4.0, 8.0, 4.0, 1.0, 4.0],
+        7 => &[20.0, 4.0, 8.0, 4.0],
+        8 => &[20.0, 4.0, 8.0, 4.0, 8.0, 4.0],
+        9 => &[4.0, 2.0],
         10 => &[1.0, 2.0],
-        11 => &[3.0, 2.0, 1.0, 2.0],
-        12 => &[3.0, 2.0, 1.0, 2.0, 1.0, 2.0],
-        13 => &[6.0, 2.0],
-        14 => &[6.0, 2.0, 3.0, 2.0],
-        15 => &[6.0, 2.0, 3.0, 2.0, 3.0, 2.0],
-        16 => &[24.0, 8.0],
-        17 => &[24.0, 8.0, 12.0, 8.0],
-        18 => &[24.0, 8.0, 12.0, 8.0, 12.0, 8.0],
-        19 => &[1.0, 1.0],
-        20 => &[1.0, 6.0],
-        21 => &[1.0, 1.0, 1.0, 6.0],
-        22 => &[12.0, 2.0, 1.0, 2.0],
-        23 => &[2.0, 2.0],
-        _ => &[6.0, 4.0],
+        11 => &[4.0, 2.0, 1.0, 2.0],
+        12 => &[4.0, 2.0, 1.0, 2.0, 1.0, 2.0],
+        13 => &[4.0, 2.0, 4.0, 2.0, 1.0, 2.0],
+        14 => &[10.0, 2.0, 4.0, 2.0],
+        15 => &[10.0, 2.0, 4.0, 2.0, 4.0, 2.0],
+        16 => &[16.0, 8.0],
+        17 => &[1.0, 8.0],
+        18 => &[16.0, 8.0, 1.0, 8.0],
+        19 => &[16.0, 8.0, 1.0, 8.0, 1.0, 8.0],
+        20 => &[16.0, 8.0, 16.0, 8.0, 1.0, 8.0],
+        21 => &[40.0, 8.0, 16.0, 8.0],
+        22 => &[40.0, 8.0, 16.0, 8.0, 16.0, 8.0],
+        23 => &[2.0, 1.0],
+        _ => &[8.0, 4.0],
     };
     units.iter().map(|u| u * unit).collect()
 }
@@ -929,5 +973,19 @@ mod tests {
         assert_eq!(d[0], Seg::M { x: 3.25, y: 5.0 });
         let Item::Text { paragraphs, .. } = &dl.items[1] else { panic!() };
         assert_eq!(paragraphs[0].runs[0].text, "Hello from Flowster");
+        // The drawing's extents: the box plus half its stroke.
+        let half = stroke.as_ref().unwrap().width / 2.0;
+        let [x0, y0, x1, y1] = dl.extents().unwrap();
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        assert!(near(x0, 3.25 - half) && near(y0, 5.0 - half) && near(x1, 5.25 + half) && near(y1, 6.0 + half));
+    }
+
+    #[test]
+    fn dash_patterns_scale_with_the_weight() {
+        assert!(dash_pattern(1.0, 0.02).is_empty());
+        assert_eq!(dash_pattern(2.0, 0.02), vec![0.16, 0.08]);
+        assert_eq!(dash_pattern(7.0, 0.1), vec![2.0, 0.4, 0.8, 0.4]);
+        // Hairlines keep a visible pattern.
+        assert_eq!(dash_pattern(3.0, 0.0), vec![0.01, 0.04]);
     }
 }

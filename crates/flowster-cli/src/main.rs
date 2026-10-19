@@ -3,6 +3,7 @@
 //! * `flowster info <file> [--json]`: parts and relationships of a package;
 //! * `flowster export <file> <out.svg|.png|.pdf|.json> [--page N] [--dpi D]`: render a page
 //!   (PDF: every foreground page unless --page is given) or dump its display list;
+//! * `flowster conform <dir> [--diff out] [--json]`: SSIM of every corpus page against the oracle's PNG;
 //! * `flowster recalc-check <file> [--json]`: recompute every formula and compare with Visio's cached values;
 //! * `flowster determinism [--json]`: derived-state hash (compared against WASM in CI);
 //! * `flowster bench crdt [--shapes N] [--library loro|yrs|all] [--json]`: the CRDT spike;
@@ -51,6 +52,18 @@ enum Cmd {
         /// Mismatches to list (all with --json).
         #[arg(long, default_value_t = 20)]
         show: usize,
+    },
+    /// Compare our renderings with the oracle's (`<name>-p<N>.png` next to each `<name>.vsdx` in a folder).
+    Conform {
+        dir: PathBuf,
+        /// SSIM a page needs to pass.
+        #[arg(long, default_value_t = 0.95)]
+        threshold: f64,
+        /// Write our aligned rendering and the SSIM map of every page here.
+        #[arg(long)]
+        diff: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
     },
     /// Print the derived-state determinism hash.
     Determinism {
@@ -108,6 +121,7 @@ fn main() -> Result<()> {
         Cmd::Info { file, json } => info(&file, json),
         Cmd::Export { file, out, page, dpi } => export(&file, &out, page, dpi),
         Cmd::RecalcCheck { file, json, show } => recalc_check(&file, json, show),
+        Cmd::Conform { dir, threshold, diff, json } => conform(&dir, threshold, diff.as_ref(), json),
         Cmd::Determinism { json } => {
             let r = flowster_core::determinism::default_report();
             if json {
@@ -227,6 +241,110 @@ fn recalc_check(file: &PathBuf, json: bool, show: usize) -> Result<()> {
     for m in r.mismatched.iter().take(show) {
         println!("  {} shape {} {}: {}  →  {} (cached {})", m.page, m.shape, m.cell, m.formula, m.computed, m.cached);
     }
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+struct PageScore {
+    file: String,
+    page: usize,
+    ssim: f64,
+    dpi: f64,
+    ref_box: (usize, usize),
+    our_box: (usize, usize),
+}
+
+fn conform(dir: &PathBuf, threshold: f64, diff: Option<&PathBuf>, json: bool) -> Result<()> {
+    use flowster_export::compare::{Gray, compare};
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .with_context(|| format!("reading {}", dir.display()))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("vsdx")))
+        .collect();
+    files.sort();
+    if let Some(d) = diff {
+        std::fs::create_dir_all(d)?;
+    }
+    let mut text = flowster_text::TextEngine::system();
+    let mut scores = Vec::new();
+    for file in &files {
+        let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_owned();
+        let bytes = std::fs::read(file)?;
+        let pkg = flowster_vsdx::OpcPackage::open(bytes).with_context(|| format!("opening {}", file.display()))?;
+        let doc = flowster_vsdx::visio::read_document(&pkg)?;
+        // Visio's Pages collection (and so the oracle's numbering) lists foreground pages first.
+        let order = (0..doc.pages.len()).filter(|&i| !doc.pages[i].background);
+        let order: Vec<usize> = order.chain((0..doc.pages.len()).filter(|&i| doc.pages[i].background)).collect();
+        for (n, &index) in order.iter().enumerate() {
+            let ref_path = dir.join(format!("{stem}-p{}.png", n + 1));
+            let Ok(ref_bytes) = std::fs::read(&ref_path) else { continue };
+            let reference = Gray::decode_png(&ref_bytes).with_context(|| format!("decoding {}", ref_path.display()))?;
+            let Some(dl) = flowster_render::build_page(&doc, index) else { continue };
+            let layouts = text.layout_display_list(&dl);
+            // Visio exports the drawing's extents, which may reach past the page.
+            let Some([x0, y0, x1, y1]) = dl.extents() else { continue };
+            let area = [x0 - 0.25, y0 - 0.25, x1 + 0.25, y1 + 0.25];
+            let render = |dpi: f64, area: [f64; 4]| {
+                flowster_export::png::render_area(&dl, &layouts, dpi, area).map(|p| Gray::from_pixmap(&p))
+            };
+            // The oracle's export resolution is not recorded: match content-box sizes.
+            let (Some(probe), Some((rx0, ry0, rx1, ry1))) = (render(96.0, area), reference.content_box()) else {
+                continue;
+            };
+            let Some((ox0, oy0, ox1, oy1)) = probe.content_box() else { continue };
+            let estimate = 96.0 * ((rx1 - rx0) + (ry1 - ry0)) as f64 / ((ox1 - ox0) + (oy1 - oy0)) as f64;
+            // Content boxes are skewed by anything that differs at the edges,
+            // and Visio's scale is not exactly the display's: refine around the
+            // estimate by the best geometric fit.
+            let candidates: Vec<_> = std::thread::scope(|scope| {
+                let jobs: Vec<_> = (-6..=6)
+                    .map(|k| {
+                        let dpi = estimate + f64::from(k) * 0.2;
+                        let (render, reference) = (&render, &reference);
+                        scope.spawn(move || render(dpi, area).and_then(|g| compare(reference, &g)).map(|c| (dpi, c)))
+                    })
+                    .collect();
+                jobs.into_iter().filter_map(|j| j.join().ok().flatten()).collect()
+            });
+            let Some((dpi, c)) = candidates.into_iter().min_by(|a, b| a.1.mad.total_cmp(&b.1.mad)) else { continue };
+            // Render again with our image origin where the oracle's is, so that
+            // pixel-anchored hatch tiles line up as well.
+            let (dx, dy) = (c.offset.0 as f64 / dpi, c.offset.1 as f64 / dpi);
+            let ours = render(dpi, [area[0] + dx, area[1], area[2], area[3] - dy]).context("rendering")?;
+            let Some(c) = compare(&reference, &ours) else { continue };
+            if let Some(d) = diff {
+                if let Some(png) = c.aligned.encode_png() {
+                    std::fs::write(d.join(format!("{stem}-p{}-ours.png", n + 1)), png)?;
+                }
+                let map = Gray { width: reference.width, height: reference.height, px: c.map.clone() };
+                if let Some(png) = map.encode_png() {
+                    std::fs::write(d.join(format!("{stem}-p{}-ssim.png", n + 1)), png)?;
+                }
+            }
+            scores.push(PageScore {
+                file: stem.clone(),
+                page: n + 1,
+                ssim: c.ssim,
+                dpi,
+                ref_box: c.ref_box,
+                our_box: c.our_box,
+            });
+        }
+    }
+    let passed = scores.iter().filter(|s| s.ssim >= threshold).count();
+    if json {
+        println!("{}", serde_json::to_string_pretty(&scores)?);
+        return Ok(());
+    }
+    for s in &scores {
+        let mark = if s.ssim >= threshold { "ok  " } else { "FAIL" };
+        println!(
+            "{mark} {:<12} p{:<2} ssim {:.4}  dpi {:>6.1}  box {}×{} vs ours {}×{}",
+            s.file, s.page, s.ssim, s.dpi, s.ref_box.0, s.ref_box.1, s.our_box.0, s.our_box.1
+        );
+    }
+    let pct = if scores.is_empty() { 0.0 } else { passed as f64 * 100.0 / scores.len() as f64 };
+    println!("{passed}/{} pages at SSIM ≥ {threshold} ({pct:.0}%)", scores.len());
     Ok(())
 }
 

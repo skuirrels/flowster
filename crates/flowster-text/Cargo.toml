@@ -15,6 +15,7 @@ system-fonts = ["parley/system"]
 flowster-core.workspace = true
 flowster-render.workspace = true
 parley = { version = "0.12", default-features = false, features = ["std"] }
+skrifa = "0.44"
 
 [dev-dependencies]
 flowster-vsdx.workspace = true
