@@ -2,6 +2,7 @@
 // event stream for panes. One client (and one worker) per window.
 
 import type {
+  ChangeSummary,
   Command,
   DocId,
   EngineEvent,
@@ -43,12 +44,17 @@ export class EngineClient {
     return this.request<OpenResult>({ kind: "open", bytes, fileName }, [bytes]);
   }
 
+  /** A new, blank drawing (File > New). */
+  newDrawing(title?: string): Promise<OpenResult> {
+    return this.request<OpenResult>({ kind: "new", title });
+  }
+
   query<Q extends Query>(doc: DocId, q: Q): Promise<QueryResult<Q>> {
     return this.request<QueryResult<Q>>({ kind: "query", doc, q });
   }
 
-  exec(doc: DocId, cmd: Command): Promise<void> {
-    return this.request<void>({ kind: "exec", doc, cmd });
+  exec(doc: DocId, cmd: Command): Promise<ChangeSummary | null> {
+    return this.request<ChangeSummary | null>({ kind: "exec", doc, cmd });
   }
 
   close(doc: DocId): Promise<void> {

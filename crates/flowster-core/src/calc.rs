@@ -383,6 +383,68 @@ impl Env for SheetEnv<'_, '_> {
     }
 }
 
+/// Cells of a shape whose cached value no longer matches its formula: the
+/// stale cells to rewrite after an edit (SPEC §6.9: inputs change, outputs
+/// follow). Formulas inherited from a master are evaluated in the shape's own
+/// context; only numeric results are returned, formatted for a `V` attribute.
+pub fn stale_cells(doc: &Document, page: usize, shape: u32) -> Vec<(Addr, String)> {
+    let Some(page) = doc.pages.get(page) else { return Vec::new() };
+    let calc = Calc::for_page(doc, page);
+    let Some(r) = calc.resolved(shape) else { return Vec::new() };
+    let mut out = Vec::new();
+    let differs = |new: f64, old: Option<&str>| old.and_then(parse_num).is_none_or(|o| (o - new).abs() > 1e-9);
+    let mut names: Vec<&String> = r.chain_sheets().flat_map(|s| s.cells.keys()).collect();
+    names.sort();
+    names.dedup();
+    for name in names {
+        let Some(def) = r.cell_def(name) else { continue };
+        if def.f.is_none_or(|f| f.eq_ignore_ascii_case("No Formula")) {
+            continue;
+        }
+        let addr = Addr::Single(name.clone());
+        if let Value::Num(n) = calc.value(shape, &addr)
+            && differs(n, def.v)
+        {
+            out.push((addr, format_num(n)));
+        }
+    }
+    let mut sections: Vec<&String> = r.chain_sheets().flat_map(|s| s.sections.iter().map(|x| &x.n)).collect();
+    sections.sort();
+    sections.dedup();
+    for name in sections {
+        for sec in r.sections(name) {
+            let Some(section_ix) = sec.ix else { continue };
+            for row in &sec.rows {
+                let key = match (&row.n, row.ix) {
+                    (Some(n), _) => RowKey::Name(n.clone()),
+                    (None, Some(ix)) => RowKey::Ix(ix),
+                    _ => continue,
+                };
+                for (cell, f) in &row.f {
+                    if f.eq_ignore_ascii_case("No Formula") {
+                        continue;
+                    }
+                    let addr =
+                        Addr::Row { section: name.clone(), section_ix, row: Some(key.clone()), cell: cell.clone() };
+                    if let Value::Num(n) = calc.value(shape, &addr)
+                        && differs(n, row.v.get(cell).map(String::as_str))
+                    {
+                        out.push((addr, format_num(n)));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A number as Visio writes `V` attributes: shortest round-trip, no exponent
+/// for ordinary magnitudes, and no negative zero.
+pub fn format_num(n: f64) -> String {
+    let n = if n == 0.0 { 0.0 } else { n };
+    format!("{n}")
+}
+
 /// Outcome of recomputing every formula in a document.
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct RecalcReport {

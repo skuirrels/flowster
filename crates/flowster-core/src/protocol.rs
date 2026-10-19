@@ -17,6 +17,11 @@ pub enum EngineRequest {
     Open {
         file_name: String,
     },
+    /// A new, blank drawing.
+    New {
+        #[serde(default)]
+        title: Option<String>,
+    },
     Exec {
         doc: DocId,
         cmd: Command,

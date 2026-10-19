@@ -14,6 +14,8 @@ pub mod synth;
 #[cfg(feature = "loro")]
 pub mod document;
 #[cfg(feature = "loro")]
+pub mod edit;
+#[cfg(feature = "loro")]
 pub mod loro_store;
 #[cfg(feature = "loro")]
 pub mod model_io;

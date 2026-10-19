@@ -270,6 +270,7 @@ tbody tr:nth-child(even) {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .drawing-canvas {
@@ -277,13 +278,9 @@ tbody tr:nth-child(even) {
   min-height: 0;
   width: 100%;
   display: block;
-  cursor: grab;
+  cursor: default;
   touch-action: none;
   outline: none;
-}
-
-.drawing-canvas:active {
-  cursor: grabbing;
 }
 
 .drawing > .empty {
@@ -341,9 +338,32 @@ tbody tr:nth-child(even) {
   padding: 4px 12px;
 }
 
-.segmented button[aria-selected="true"] {
+.segmented button[aria-selected="true"],
+.segmented button[aria-pressed="true"] {
   background: var(--accent);
   color: var(--accent-text);
+}
+
+/* In-place text editing over the shape being edited. */
+.text-editor {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  padding: 4px;
+  border: 2px solid var(--accent);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #000000;
+  font: 14px Calibri, Carlito, "Segoe UI", sans-serif;
+  text-align: center;
+  resize: none;
+  outline: none;
+}
+
+.empty-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
 }
 
 .zoom {

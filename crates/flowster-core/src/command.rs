@@ -3,7 +3,8 @@
 //! Every edit is a [`Command`]. A [`CommandTarget`] (the CRDT-backed document)
 //! runs each one as a single transaction tagged with the local origin, so undo,
 //! macros, plugins and collaboration share one path. v1 grows this enum toward
-//! the ~300 `VisUICmds`-style variants; M0 has just enough to prove the path.
+//! the ~300 `VisUICmds`-style variants; M2 starts with drawing, moving,
+//! resizing, deleting and text.
 
 use serde::{Deserialize, Serialize};
 
@@ -16,9 +17,69 @@ pub enum Command {
         key: String,
         value: String,
     },
+    /// Draws a new shape on a page. 2-D shapes fill the box `(x, y)`–`(x + w,
+    /// y + h)` (page inches, +Y up); a line runs from `(x, y)` to `(x + w, y + h)`.
+    #[serde(rename_all = "camelCase")]
+    AddShape {
+        page: usize,
+        shape: ShapeKind,
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+    },
+    /// Moves top-level shapes by `(dx, dy)` inches.
+    #[serde(rename_all = "camelCase")]
+    MoveShapes {
+        page: usize,
+        shapes: Vec<u32>,
+        dx: f64,
+        dy: f64,
+    },
+    /// Resizes a 2-D shape: its new pin (page inches) and size.
+    #[serde(rename_all = "camelCase")]
+    SetBounds {
+        page: usize,
+        shape: u32,
+        pin_x: f64,
+        pin_y: f64,
+        width: f64,
+        height: f64,
+    },
+    /// Moves the ends of a 1-D shape (page inches).
+    #[serde(rename_all = "camelCase")]
+    SetEndpoints {
+        page: usize,
+        shape: u32,
+        begin_x: f64,
+        begin_y: f64,
+        end_x: f64,
+        end_y: f64,
+    },
+    #[serde(rename_all = "camelCase")]
+    DeleteShapes {
+        page: usize,
+        shapes: Vec<u32>,
+    },
+    /// Replaces a shape's text (plain text; formatting comes from its rows).
+    #[serde(rename_all = "camelCase")]
+    SetText {
+        page: usize,
+        shape: u32,
+        text: String,
+    },
     /// Per-user undo of this peer's last command.
     Undo,
     Redo,
+}
+
+/// What the drawing tools create.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ShapeKind {
+    Rectangle,
+    Ellipse,
+    Line,
 }
 
 impl Command {
@@ -26,6 +87,13 @@ impl Command {
     pub fn label(&self) -> &'static str {
         match self {
             Command::SetDocProp { .. } => "Change Document Property",
+            Command::AddShape { shape: ShapeKind::Rectangle, .. } => "Draw Rectangle",
+            Command::AddShape { shape: ShapeKind::Ellipse, .. } => "Draw Ellipse",
+            Command::AddShape { shape: ShapeKind::Line, .. } => "Draw Line",
+            Command::MoveShapes { .. } => "Move",
+            Command::SetBounds { .. } | Command::SetEndpoints { .. } => "Resize",
+            Command::DeleteShapes { .. } => "Delete",
+            Command::SetText { .. } => "Edit Text",
             Command::Undo => "Undo",
             Command::Redo => "Redo",
         }
@@ -42,6 +110,9 @@ pub struct ChangeSummary {
     pub shapes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub opened: Option<OpenedSummary>,
+    /// The shape a command created (`page`, legacy id), for selecting it.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub created: Option<(usize, u32)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

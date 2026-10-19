@@ -12,10 +12,24 @@ use serde_json::{Value, json};
 
 struct OpenDoc {
     file_name: String,
-    package: Package,
-    /// The Visio model read from the package (`None` if it is not a Visio drawing).
+    /// The package the document was opened from (`None` for a new drawing).
+    package: Option<Package>,
+    /// The Visio model as the CRDT holds it (`None` if the file is not a Visio drawing).
     model: Option<Model>,
+    /// Problems met reading the file, kept across re-reads of the model.
+    warnings: Vec<String>,
     doc: Document,
+}
+
+impl OpenDoc {
+    /// Re-reads the model from the CRDT after a change (SPEC §20.6).
+    fn refresh(&mut self) {
+        if self.model.is_some() {
+            let mut m = self.doc.read_model(flowster_vsdx::visio::parse_theme_xml);
+            m.warnings = self.warnings.clone();
+            self.model = Some(m);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -74,6 +88,7 @@ impl Engine {
         doc.import_package(file_name, &format, &entries);
         // The CRDT is the source of truth (SPEC §20.6): write the drawing into
         // it and render what reads back.
+        let warnings = model.as_ref().map(|m| m.warnings.clone()).unwrap_or_default();
         let model = model.map(|m| {
             let theme = flowster_vsdx::visio::theme_xml(&pkg);
             doc.import_model(&m, theme.as_deref(), flowster_crdt::model_io::seed_of(bytes));
@@ -102,17 +117,55 @@ impl Engine {
             EngineEvent::SyncState { doc: doc_id.clone(), state: SyncStateKind::Local, pending_ops: 0 },
             EngineEvent::Reply { id, result },
         ];
-        self.docs.insert(doc_id, OpenDoc { file_name: file_name.to_owned(), package, model, doc });
+        self.docs
+            .insert(doc_id, OpenDoc { file_name: file_name.to_owned(), package: Some(package), model, warnings, doc });
+        events
+    }
+
+    /// A new, blank drawing (File > New).
+    fn new_drawing(&mut self, id: u32, title: Option<String>) -> Vec<EngineEvent> {
+        self.next_doc += 1;
+        let doc_id = format!("doc-{}", self.next_doc);
+        let title = title.unwrap_or_else(|| format!("Drawing{}", self.next_doc));
+        let doc = Document::new_drawing(&title);
+        let model = Some(doc.read_model(flowster_vsdx::visio::parse_theme_xml));
+        let file_name = format!("{title}.vsdx");
+        let result = json!({
+            "doc": doc_id,
+            "fileName": file_name,
+            "kind": "drawing",
+            "mainPart": null,
+            "partCount": 0,
+            "pageCount": 1,
+        });
+        let opened = OpenedSummary { file_name: file_name.clone(), format: "vsdx".into(), part_count: 0 };
+        let events = vec![
+            EngineEvent::ModelChanged {
+                doc: doc_id.clone(),
+                changes: ChangeSummary { opened: Some(opened), ..Default::default() },
+            },
+            undo_event(&doc_id, &doc),
+            EngineEvent::SyncState { doc: doc_id.clone(), state: SyncStateKind::Local, pending_ops: 0 },
+            EngineEvent::Reply { id, result },
+        ];
+        self.docs.insert(doc_id, OpenDoc { file_name, package: None, model, warnings: Vec::new(), doc });
         events
     }
 
     pub fn handle(&mut self, id: u32, req: EngineRequest) -> Vec<EngineEvent> {
         match req {
             EngineRequest::Open { .. } => error(id, "open needs file bytes; use Engine::open"),
+            EngineRequest::New { title } => self.new_drawing(id, title),
             EngineRequest::Query { doc, q } => {
                 let Some(d) = self.docs.get(&doc) else { return error(id, format!("no document {doc}")) };
                 let result = match q {
-                    Query::PackageParts => serde_json::to_value(&d.package).unwrap_or(Value::Null),
+                    Query::PackageParts => match &d.package {
+                        Some(p) => serde_json::to_value(p).unwrap_or(Value::Null),
+                        None => json!({
+                            "kind": "drawing", "mainPart": null, "parts": [], "relationships": [],
+                            "contentTypes": {"defaults": [], "overrides": []}, "totalSize": 0, "warnings": [],
+                        }),
+                    },
                     Query::DocInfo => json!({
                         "fileName": d.file_name,
                         "meta": d.doc.meta(),
@@ -139,11 +192,15 @@ impl Engine {
             EngineRequest::Exec { doc, cmd } => {
                 let Some(d) = self.docs.get_mut(&doc) else { return error(id, format!("no document {doc}")) };
                 match d.doc.exec(&cmd) {
-                    Ok(changes) => vec![
-                        EngineEvent::ModelChanged { doc: doc.clone(), changes },
-                        undo_event(&doc, &d.doc),
-                        EngineEvent::Reply { id, result: Value::Null },
-                    ],
+                    Ok(changes) => {
+                        d.refresh();
+                        let result = serde_json::to_value(&changes).unwrap_or(Value::Null);
+                        vec![
+                            EngineEvent::ModelChanged { doc: doc.clone(), changes },
+                            undo_event(&doc, &d.doc),
+                            EngineEvent::Reply { id, result },
+                        ]
+                    }
                     Err(e) => error(id, e.to_string()),
                 }
             }
@@ -216,6 +273,23 @@ mod tests {
         assert_eq!(items[1]["kind"], "text");
         let ev = e.handle(4, EngineRequest::Query { doc, q: Query::PageDisplayList { page: 7 } });
         assert!(matches!(ev[0], EngineEvent::Error { id: Some(4), .. }));
+    }
+
+    #[test]
+    fn new_drawing_then_draw_and_undo() {
+        use flowster_core::command::ShapeKind;
+        let mut e = Engine::new();
+        let ev = e.handle(1, EngineRequest::New { title: None });
+        let doc = reply(&ev)["doc"].as_str().unwrap().to_owned();
+        let add = Command::AddShape { page: 0, shape: ShapeKind::Rectangle, x: 1.0, y: 1.0, w: 2.0, h: 1.0 };
+        let ev = e.handle(2, EngineRequest::Exec { doc: doc.clone(), cmd: add });
+        assert_eq!(reply(&ev)["created"], serde_json::json!([0, 1]));
+        let ev = e.handle(3, EngineRequest::Query { doc: doc.clone(), q: Query::PageDisplayList { page: 0 } });
+        assert_eq!(reply(&ev)["shapes"][0]["id"], 1);
+        assert_eq!(reply(&ev)["shapes"][0]["width"], 2.0);
+        e.handle(4, EngineRequest::Exec { doc: doc.clone(), cmd: Command::Undo });
+        let ev = e.handle(5, EngineRequest::Query { doc, q: Query::PageDisplayList { page: 0 } });
+        assert_eq!(reply(&ev)["shapes"].as_array().unwrap().len(), 0);
     }
 
     #[test]

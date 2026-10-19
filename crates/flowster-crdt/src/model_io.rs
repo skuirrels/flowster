@@ -94,7 +94,7 @@ fn hex128(v: u128) -> String {
 }
 
 /// A version-8 (custom) uuid for an imported object.
-fn uuid(seed: u64, kind: u8, a: u32, b: u32) -> String {
+pub(crate) fn uuid(seed: u64, kind: u8, a: u32, b: u32) -> String {
     let mut key = [0u8; 9];
     key[0] = kind;
     key[1..5].copy_from_slice(&a.to_le_bytes());
@@ -119,7 +119,7 @@ struct Writer<'a> {
 
 /// A `CellEntry` as a positional `[v, f, u]` array, trailing nulls dropped
 /// (smaller in snapshots and updates than a `{v, f, u}` map; ADR 0001).
-fn cell_value(c: &Cell) -> LoroValue {
+pub(crate) fn cell_value(c: &Cell) -> LoroValue {
     let mut parts: Vec<LoroValue> =
         [&c.v, &c.f, &c.u].iter().map(|v| v.as_deref().map_or(LoroValue::Null, LoroValue::from)).collect();
     while parts.last() == Some(&LoroValue::Null) {
@@ -128,11 +128,11 @@ fn cell_value(c: &Cell) -> LoroValue {
     parts.into()
 }
 
-fn group_of(cell: &str) -> Option<&'static str> {
+pub(crate) fn group_of(cell: &str) -> Option<&'static str> {
     GROUPS.iter().find(|(_, cells)| cells.contains(&cell)).map(|(g, _)| *g)
 }
 
-fn section_key(s: &Section) -> String {
+pub(crate) fn section_key(s: &Section) -> String {
     match s.ix {
         Some(ix) => format!("{}.{ix}", s.n),
         None => s.n.clone(),
@@ -160,7 +160,7 @@ fn write_row(m: &LoroMap, row: &Row, pos: usize) {
 
 /// `m[key]` as a map container, created on first use (empty containers cost
 /// snapshot space, so sheets create only the parts they have).
-fn lazy_map(m: &LoroMap, key: &str) -> LoroMap {
+pub(crate) fn lazy_map(m: &LoroMap, key: &str) -> LoroMap {
     child_map(m, key).unwrap_or_else(|| m.insert_container(key, LoroMap::new()).unwrap())
 }
 
@@ -220,7 +220,7 @@ fn write_sheet(m: &LoroMap, sheet: &Sheet) {
     }
 }
 
-fn write_text(t: &LoroText, pieces: &[TextPiece]) {
+pub(crate) fn write_text(t: &LoroText, pieces: &[TextPiece]) {
     let (mut cp, mut pp, mut tp, mut fld) = (None, None, None, None);
     let mut pos = 0usize;
     for piece in pieces {
@@ -317,12 +317,21 @@ impl Writer<'_> {
     }
 }
 
-fn tree(doc: &LoroDoc, key: &str) -> LoroTree {
+pub(crate) fn tree(doc: &LoroDoc, key: &str) -> LoroTree {
     let t = doc.get_tree(key);
     if !t.is_fractional_index_enabled() {
         t.enable_fractional_index(0);
     }
     t
+}
+
+/// Writes one new top-level shape (no master, no styles) into a page tree,
+/// appended on top of the z-order.
+pub(crate) fn write_new_shape(doc: &LoroDoc, page_uuid: &str, shape: &Shape, uuid: &str) {
+    let w = Writer { doc, seed: 0 };
+    let id = uuid.to_owned();
+    let t = tree(doc, &schema::shapes_tree_key(page_uuid));
+    w.write_shapes(&t, None, std::slice::from_ref(shape), &move |_| id.clone(), &BTreeMap::new());
 }
 
 /// Writes `model` into `doc` (uncommitted) and returns the payloads it refers
@@ -438,28 +447,28 @@ pub fn write_model(doc: &LoroDoc, model: &Model, theme_xml: Option<&[u8]>, seed:
 
 // ------------------------------------------------------------------ reading
 
-fn child_map(m: &LoroMap, key: &str) -> Option<LoroMap> {
+pub(crate) fn child_map(m: &LoroMap, key: &str) -> Option<LoroMap> {
     match m.get(key)? {
         ValueOrContainer::Container(Container::Map(c)) => Some(c),
         _ => None,
     }
 }
 
-fn value(m: &LoroMap, key: &str) -> Option<LoroValue> {
+pub(crate) fn value(m: &LoroMap, key: &str) -> Option<LoroValue> {
     match m.get(key)? {
         ValueOrContainer::Value(v) => Some(v),
         _ => None,
     }
 }
 
-fn string(m: &LoroMap, key: &str) -> Option<String> {
+pub(crate) fn string(m: &LoroMap, key: &str) -> Option<String> {
     match value(m, key)? {
         LoroValue::String(s) => Some(s.to_string()),
         _ => None,
     }
 }
 
-fn int(m: &LoroMap, key: &str) -> Option<i64> {
+pub(crate) fn int(m: &LoroMap, key: &str) -> Option<i64> {
     match value(m, key)? {
         LoroValue::I64(i) => Some(i),
         _ => None,
@@ -474,7 +483,7 @@ fn u32_of(v: Option<i64>) -> Option<u32> {
     v.and_then(|i| u32::try_from(i).ok())
 }
 
-fn cell_from(v: &LoroValue) -> Cell {
+pub(crate) fn cell_from(v: &LoroValue) -> Cell {
     let LoroValue::List(l) = v else { return Cell::default() };
     let get = |i: usize| match l.get(i) {
         Some(LoroValue::String(s)) => Some(s.to_string()),
@@ -484,7 +493,7 @@ fn cell_from(v: &LoroValue) -> Cell {
 }
 
 /// Every `(key, value)` of a map (containers included), sorted by key.
-fn entries(m: &LoroMap) -> Vec<(String, ValueOrContainer)> {
+pub(crate) fn entries(m: &LoroMap) -> Vec<(String, ValueOrContainer)> {
     let mut out = Vec::new();
     m.for_each(|k, v| out.push((k.to_owned(), v)));
     out.sort_by(|a, b| a.0.cmp(&b.0));

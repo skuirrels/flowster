@@ -46,7 +46,28 @@ pub struct PageInfo {
 pub struct DisplayList {
     pub page: PageInfo,
     pub items: Vec<Item>,
+    /// The page's top-level shapes, back to front.
+    pub shapes: Vec<ShapeBox>,
     pub warnings: Vec<String>,
+}
+
+/// Where a top-level shape is, for selecting, moving and resizing it.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShapeBox {
+    pub id: u32,
+    /// Shape-local inches (origin bottom-left, +Y up) → page inches.
+    pub transform: Affine,
+    pub width: f64,
+    pub height: f64,
+    /// Page positions of a 1-D shape's ends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub begin: Option<(f64, f64)>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<(f64, f64)>,
+    /// The shape's text, for editing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 
 impl DisplayList {
@@ -203,6 +224,8 @@ pub fn build_page(doc: &Document, index: usize) -> Option<DisplayList> {
         variation: (0, 0),
         calc: None,
         page_shadow: (0.0, 0.0),
+        boxes: None,
+        depth: 0,
     };
     let mut chain: Vec<&Page> = Vec::new();
     let mut next = doc.pages[index].back_page;
@@ -218,10 +241,12 @@ pub fn build_page(doc: &Document, index: usize) -> Option<DisplayList> {
     for bp in chain.iter().rev() {
         b.page(bp);
     }
+    // Only the page's own shapes can be selected, not its backgrounds'.
+    b.boxes = Some(Vec::new());
     b.page(&doc.pages[index]);
     let mut warnings = doc.warnings.clone();
     warnings.append(&mut b.warnings);
-    Some(DisplayList { page: info, items: b.items, warnings })
+    Some(DisplayList { page: info, items: b.items, shapes: b.boxes.unwrap_or_default(), warnings })
 }
 
 struct Builder<'d> {
@@ -236,6 +261,10 @@ struct Builder<'d> {
     calc: Option<Calc<'d>>,
     /// The page's default shadow offset (`ShdwOffsetX/Y` in the page sheet).
     page_shadow: (f64, f64),
+    /// Selection boxes of the page's top-level shapes (`None` on background pages).
+    boxes: Option<Vec<ShapeBox>>,
+    /// Group nesting of the shape being built (0 = on the page).
+    depth: usize,
 }
 
 /// A resolved drop shadow, in page inches.
@@ -371,14 +400,34 @@ impl<'d> Builder<'d> {
         );
         let world = parent.then(local);
 
+        if self.depth == 0 && self.boxes.is_some() {
+            let end = |x: &str, y: &str| Some(parent.apply((cell(x)?, cell(y)?)));
+            let text = r.text().map(|pieces| {
+                pieces.iter().filter_map(|p| if let TextPiece::Text(t) = p { Some(t.as_str()) } else { None }).collect()
+            });
+            let b = ShapeBox {
+                id: shape.id,
+                transform: world,
+                width: w,
+                height: h,
+                begin: end("BeginX", "BeginY"),
+                end: end("EndX", "EndY"),
+                text,
+            };
+            if let Some(boxes) = &mut self.boxes {
+                boxes.push(b);
+            }
+        }
         if shape.kind == ShapeType::Foreign || r.foreign().is_some() {
             self.image(&r, world, w, h);
         }
         self.geometry(&r, world, w, h);
         let master = r.master();
+        self.depth += 1;
         for child in r.children() {
             self.shape(child, world, master);
         }
+        self.depth -= 1;
         self.text(&r, world, w, h);
     }
 

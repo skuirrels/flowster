@@ -9,8 +9,17 @@ export type ShapeRef = { page: number; id: number };
 
 // ---- commands (the command bus, §5.5) --------------------------------------
 
+export type ShapeKind = "rectangle" | "ellipse" | "line";
+
 export type Command =
   | { kind: "setDocProp"; key: string; value: string }
+  /** 2-D shapes fill (x, y)–(x + w, y + h) in page inches; a line runs between those points. */
+  | { kind: "addShape"; page: number; shape: ShapeKind; x: number; y: number; w: number; h: number }
+  | { kind: "moveShapes"; page: number; shapes: number[]; dx: number; dy: number }
+  | { kind: "setBounds"; page: number; shape: number; pinX: number; pinY: number; width: number; height: number }
+  | { kind: "setEndpoints"; page: number; shape: number; beginX: number; beginY: number; endX: number; endY: number }
+  | { kind: "deleteShapes"; page: number; shapes: number[] }
+  | { kind: "setText"; page: number; shape: number; text: string }
   | { kind: "undo" }
   | { kind: "redo" };
 
@@ -176,9 +185,24 @@ export interface PageInfo {
   height: number;
 }
 
+/** A top-level shape's frame, for selection and handles. */
+export interface ShapeBox {
+  id: number;
+  /** Shape-local inches (origin bottom-left, +Y up) → page inches. */
+  transform: Affine;
+  width: number;
+  height: number;
+  /** Page positions of a 1-D shape's ends. */
+  begin?: [number, number];
+  end?: [number, number];
+  text?: string;
+}
+
 export interface DisplayList {
   page: PageInfo;
   items: Item[];
+  /** The page's top-level shapes, back to front. */
+  shapes: ShapeBox[];
   warnings: string[];
 }
 
@@ -202,6 +226,7 @@ export type ExportFormat = "pdf" | "svg" | "png";
 
 export type EngineRequest =
   | { kind: "open"; bytes: ArrayBuffer; fileName: string }
+  | { kind: "new"; title?: string }
   | { kind: "exec"; doc: DocId; cmd: Command } // undoable
   | { kind: "gesture"; doc: DocId; g: GestureEvent }
   | { kind: "query"; doc: DocId; q: Query } // read-only
@@ -220,6 +245,8 @@ export interface ChangeSummary {
   meta?: string[];
   shapes?: string[];
   opened?: { fileName: string; format: string; partCount: number };
+  /** The shape a command created: [page, id]. */
+  created?: [number, number];
 }
 
 export type SyncState = "local" | "connecting" | "live" | "offline";

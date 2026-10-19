@@ -24,6 +24,7 @@ pest = { version = "=2.8.8", optional = true }
 [dev-dependencies]
 serde_json.workspace = true
 flowster-vsdx.workspace = true
+flowster-render.workspace = true
 
 [lints]
 workspace = true

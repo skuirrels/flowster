@@ -24,6 +24,8 @@ pub struct Document {
     undo_labels: Vec<String>,
     redo_labels: Vec<String>,
     assets: Assets,
+    /// Counter behind the uuids of shapes this peer creates.
+    next_uuid: u64,
 }
 
 /// One package part as recorded in `unknown` (§20.3: `partPath → BlobRef`).
@@ -46,7 +48,22 @@ impl Document {
         let mut undo = UndoManager::new(&doc);
         undo.set_max_undo_steps(MAX_UNDO_STEPS);
         undo.add_exclude_origin_prefix(IMPORT_ORIGIN);
-        Document { doc, undo, undo_labels: Vec::new(), redo_labels: Vec::new(), assets: Assets::default() }
+        Document {
+            doc,
+            undo,
+            undo_labels: Vec::new(),
+            redo_labels: Vec::new(),
+            assets: Assets::default(),
+            next_uuid: 0,
+        }
+    }
+
+    /// A new, blank drawing (one page), as File > New makes.
+    pub fn new_drawing(title: &str) -> Self {
+        let mut d = Self::new();
+        d.doc.get_map(schema::META).insert("title", title).unwrap();
+        d.import_model(&crate::edit::blank_model(), None, model_io::seed_of(title.as_bytes()));
+        d
     }
 
     /// A replica loaded from a snapshot, with the assets it refers to.
@@ -146,6 +163,30 @@ impl CommandTarget for Document {
                 self.redo_labels.clear();
                 changes.meta.push(key.clone());
             }
+            Command::AddShape { .. }
+            | Command::MoveShapes { .. }
+            | Command::SetBounds { .. }
+            | Command::SetEndpoints { .. }
+            | Command::DeleteShapes { .. }
+            | Command::SetText { .. } => {
+                let mut ed = crate::edit::Editor { doc: &self.doc, next: &mut self.next_uuid };
+                changes = match cmd {
+                    Command::AddShape { page, shape, x, y, w, h } => ed.add_shape(*page, *shape, *x, *y, *w, *h),
+                    Command::MoveShapes { page, shapes, dx, dy } => ed.move_shapes(*page, shapes, *dx, *dy),
+                    Command::SetBounds { page, shape, pin_x, pin_y, width, height } => {
+                        ed.set_bounds(*page, *shape, *pin_x, *pin_y, *width, *height)
+                    }
+                    Command::SetEndpoints { page, shape, begin_x, begin_y, end_x, end_y } => {
+                        ed.set_endpoints(*page, *shape, (*begin_x, *begin_y), (*end_x, *end_y))
+                    }
+                    Command::DeleteShapes { page, shapes } => ed.delete_shapes(*page, shapes),
+                    Command::SetText { page, shape, text } => ed.set_text(*page, *shape, text),
+                    _ => unreachable!(),
+                }?;
+                self.doc.commit();
+                self.undo_labels.push(cmd.label().to_owned());
+                self.redo_labels.clear();
+            }
             Command::Undo => {
                 if self.undo.undo().map_err(|e| CommandError::Failed(e.to_string()))? {
                     if let Some(l) = self.undo_labels.pop() {
@@ -178,6 +219,65 @@ impl CommandTarget for Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flowster_core::model::TextPiece;
+
+    #[test]
+    fn drawing_moving_resizing_typing_deleting_and_undo() {
+        use flowster_core::command::ShapeKind;
+        let mut d = Document::new_drawing("Drawing1");
+        let model = |d: &Document| d.read_model(|_| None);
+        assert_eq!(model(&d).pages.len(), 1);
+        assert!(!d.undo_state().can_undo);
+
+        let add = |d: &mut Document, shape, x, y, w, h| {
+            d.exec(&Command::AddShape { page: 0, shape, x, y, w, h }).unwrap().created.unwrap().1
+        };
+        let rect = add(&mut d, ShapeKind::Rectangle, 1.0, 1.0, 2.0, 1.0);
+        let ellipse = add(&mut d, ShapeKind::Ellipse, 4.0, 1.0, 2.0, 2.0);
+        let line = add(&mut d, ShapeKind::Line, 1.0, 5.0, 3.0, 4.0);
+        assert_eq!((rect, ellipse, line), (1, 2, 3));
+
+        let cell = |d: &Document, id: u32, name: &str| -> f64 {
+            let m = model(d);
+            let calc = flowster_core::calc::Calc::for_page(&m, &m.pages[0]);
+            calc.cell(id, name).num().unwrap()
+        };
+        // Cached values were filled in by recalc: the renderer draws them.
+        let m = model(&d);
+        let s = &m.pages[0].shapes[0];
+        assert_eq!(s.sheet.cells["LocPinX"].v.as_deref(), Some("1"));
+        assert_eq!(s.sheet.sections[0].rows[2].cells["X"].v.as_deref(), Some("2"));
+        assert!((cell(&d, line, "Width") - 5.0).abs() < 1e-9, "3-4-5 line");
+        let dl = flowster_render::build_page(&m, 0).unwrap();
+        assert_eq!(dl.items.iter().filter(|i| matches!(i, flowster_render::Item::Path { .. })).count(), 3);
+
+        d.exec(&Command::MoveShapes { page: 0, shapes: vec![rect, line], dx: 0.5, dy: 0.25 }).unwrap();
+        assert_eq!((cell(&d, rect, "PinX"), cell(&d, rect, "PinY")), (2.5, 1.75));
+        assert_eq!((cell(&d, line, "BeginX"), cell(&d, line, "PinY")), (1.5, 7.25));
+
+        d.exec(&Command::SetBounds { page: 0, shape: rect, pin_x: 3.0, pin_y: 2.0, width: 4.0, height: 2.0 }).unwrap();
+        let m = model(&d);
+        let s = &m.pages[0].shapes[0];
+        assert_eq!(s.sheet.cells["LocPinX"].v.as_deref(), Some("2"), "LocPin follows Width");
+        assert_eq!(s.sheet.sections[0].rows[2].cells["X"].v.as_deref(), Some("4"), "geometry follows Width");
+
+        d.exec(&Command::SetText { page: 0, shape: rect, text: "Hello".into() }).unwrap();
+        assert_eq!(model(&d).pages[0].shapes[0].text, Some(vec![TextPiece::Text("Hello".into())]));
+
+        d.exec(&Command::SetEndpoints { page: 0, shape: line, begin_x: 0.0, begin_y: 0.0, end_x: 0.0, end_y: 2.0 })
+            .unwrap();
+        assert!((cell(&d, line, "Angle") - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+
+        d.exec(&Command::DeleteShapes { page: 0, shapes: vec![ellipse] }).unwrap();
+        assert_eq!(model(&d).pages[0].shapes.len(), 2);
+        assert_eq!(d.undo_state().labels[0], "Delete");
+
+        d.exec(&Command::Undo).unwrap();
+        assert_eq!(model(&d).pages[0].shapes.len(), 3, "undo restores the ellipse");
+        d.exec(&Command::Undo).unwrap();
+        d.exec(&Command::Undo).unwrap();
+        assert_eq!(model(&d).pages[0].shapes[0].text, None, "undo removes the text");
+    }
 
     #[test]
     fn a_drawing_round_trips_through_the_crdt_and_a_snapshot() {

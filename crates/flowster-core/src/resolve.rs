@@ -179,6 +179,11 @@ impl<'d> Resolved<'d> {
         Resolved { doc, chain, master }
     }
 
+    /// The sheets of the inheritance chain: the shape's own first, then its masters'.
+    pub fn chain_sheets(&self) -> impl Iterator<Item = &'d crate::model::Sheet> + '_ {
+        self.chain.iter().map(|s| &s.sheet)
+    }
+
     pub fn shape(&self) -> &'d Shape {
         self.chain[0]
     }
