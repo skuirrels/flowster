@@ -88,6 +88,11 @@ impl Document {
         self.doc.commit();
     }
 
+    /// The stored theme part, if the drawing has one.
+    pub fn theme_xml(&self) -> Option<&[u8]> {
+        model_io::theme_xml(&self.doc, &self.assets)
+    }
+
     /// The model as the CRDT holds it now (what the engine renders).
     pub fn read_model(&self, parse_theme: impl Fn(&[u8]) -> Option<Theme>) -> Model {
         model_io::read_model(&self.doc, &self.assets, parse_theme)

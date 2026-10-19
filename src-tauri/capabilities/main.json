@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Least privilege for the main window: the two Flowster file-open commands and nothing else. No core:default, no fs/dialog/shell plugin access from the webview (SPEC §21, §23).",
+  "description": "Least privilege for the main window: the Flowster file-open and save commands and nothing else. No core:default, no fs/dialog/shell plugin access from the webview (SPEC §21, §23).",
   "windows": ["main"],
-  "permissions": ["allow-pick-document", "allow-read-picked-document"]
+  "permissions": ["allow-pick-document", "allow-read-picked-document", "allow-save-document"]
 }

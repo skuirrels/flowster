@@ -24,6 +24,24 @@ async function pickViaHost(): Promise<PickedFile | null> {
   return { fileName: picked.fileName, bytes };
 }
 
+/**
+ * Saves a document where the user chooses: the host's save dialog in the app,
+ * a download in a browser. Returns the saved file's name, or null if cancelled.
+ */
+export async function saveDocument(fileName: string, bytes: ArrayBuffer): Promise<string | null> {
+  if (inTauri) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<string | null>("save_document", new Uint8Array(bytes), { headers: { "x-file-name": fileName } });
+  }
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.ms-visio.drawing" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  return fileName;
+}
+
 function pickViaInput(): Promise<PickedFile | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");

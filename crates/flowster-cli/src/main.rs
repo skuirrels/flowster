@@ -4,6 +4,8 @@
 //! * `flowster export <file> <out.svg|.png|.pdf|.json> [--page N] [--dpi D]`: render a page
 //!   (PDF: every foreground page unless --page is given) or dump its display list;
 //! * `flowster conform <dir> [--diff out] [--json]`: SSIM of every corpus page against the oracle's PNG;
+//! * `flowster save-check <files> [--out dir]`: write back to .vsdx, read again, compare;
+//! * `flowster ssim <a.png> <b.png>`: content-aligned SSIM of two images;
 //! * `flowster crdt-check <files>`: import into the CRDT, reload from a snapshot, compare the model;
 //! * `flowster recalc-check <file> [--json]`: recompute every formula and compare with Visio's cached values;
 //! * `flowster determinism [--json]`: derived-state hash (compared against WASM in CI);
@@ -68,6 +70,15 @@ enum Cmd {
     },
     /// Import drawings into the CRDT, reload them from a snapshot and check the model reads back unchanged.
     CrdtCheck { files: Vec<PathBuf> },
+    /// Write drawings back to .vsdx, read them again and check the model is unchanged.
+    SaveCheck {
+        files: Vec<PathBuf>,
+        /// Keep the written files here (for opening them in Visio).
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// SSIM of two images (content-aligned), e.g. two Visio exports.
+    Ssim { reference: PathBuf, other: PathBuf },
     /// Print the derived-state determinism hash.
     Determinism {
         #[arg(long)]
@@ -126,6 +137,16 @@ fn main() -> Result<()> {
         Cmd::RecalcCheck { file, json, show } => recalc_check(&file, json, show),
         Cmd::Conform { dir, threshold, diff, json } => conform(&dir, threshold, diff.as_ref(), json),
         Cmd::CrdtCheck { files } => crdt_check(&files),
+        Cmd::SaveCheck { files, out } => save_check(&files, out.as_ref()),
+        Cmd::Ssim { reference, other } => {
+            use flowster_export::compare::{Gray, compare};
+            let load = |p: &PathBuf| -> Result<Gray> {
+                Gray::decode_png(&std::fs::read(p)?).with_context(|| format!("decoding {}", p.display()))
+            };
+            let c = compare(&load(&reference)?, &load(&other)?).context("an image is blank")?;
+            println!("ssim {:.4}", c.ssim);
+            Ok(())
+        }
         Cmd::Determinism { json } => {
             let r = flowster_core::determinism::default_report();
             if json {
@@ -188,6 +209,14 @@ fn export(file: &PathBuf, out: &PathBuf, page: Option<usize>, dpi: f64) -> Resul
         None => doc.pages.iter().position(|p| !p.background).unwrap_or(0),
     };
     let ext = out.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if ext == "vsdx" {
+        let title = out.file_stem().and_then(|s| s.to_str()).unwrap_or("Drawing");
+        let bytes = flowster_vsdx::writer::write_vsdx(&doc, flowster_vsdx::visio::theme_xml(&pkg).as_deref(), title)
+            .map_err(anyhow::Error::msg)?;
+        std::fs::write(out, bytes).with_context(|| format!("writing {}", out.display()))?;
+        println!("{} → {} ({} pages)", file.display(), out.display(), doc.pages.len());
+        return Ok(());
+    }
     let mut text = flowster_text::TextEngine::system();
     if ext == "pdf" {
         let indices: Vec<usize> = match page {
@@ -445,6 +474,50 @@ fn crdt_check(files: &[PathBuf]) -> Result<()> {
             import_ms,
             read_ms
         );
+    }
+    if failed > 0 {
+        bail!("{failed} of {} files did not round-trip", files.len());
+    }
+    Ok(())
+}
+
+fn save_check(files: &[PathBuf], out: Option<&PathBuf>) -> Result<()> {
+    if let Some(d) = out {
+        std::fs::create_dir_all(d)?;
+    }
+    let mut failed = 0;
+    for file in files {
+        let bytes = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
+        let pkg = flowster_vsdx::OpcPackage::open(bytes).with_context(|| format!("opening {}", file.display()))?;
+        let mut model = flowster_vsdx::visio::read_document(&pkg)?;
+        let theme = flowster_vsdx::visio::theme_xml(&pkg);
+        let title = file.file_stem().and_then(|s| s.to_str()).unwrap_or("Drawing");
+        let saved = flowster_vsdx::writer::write_vsdx(&model, theme.as_deref(), title).map_err(anyhow::Error::msg)?;
+        let pkg2 = flowster_vsdx::OpcPackage::open(saved.clone())?;
+        let mut back = flowster_vsdx::visio::read_document(&pkg2)?;
+        model.warnings.clear();
+        back.warnings.clear();
+        // Media part names follow the writer's layout; compare payloads by name.
+        let rename = |m: &mut flowster_core::model::Document| {
+            m.media = std::mem::take(&mut m.media)
+                .into_iter()
+                .map(|(k, v)| (k.rsplit('/').next().unwrap_or(&k).to_owned(), v))
+                .collect();
+        };
+        rename(&mut model);
+        rename(&mut back);
+        let verdict = match first_difference(&model, &back) {
+            None if model.pages == back.pages && model.masters == back.masters => "ok".to_owned(),
+            None => "DIFF (unlocated)".to_owned(),
+            Some(at) => format!("DIFF at {at}"),
+        };
+        if verdict != "ok" {
+            failed += 1;
+        }
+        if let Some(d) = out {
+            std::fs::write(d.join(file.file_name().unwrap_or_default()), &saved)?;
+        }
+        println!("{:<40} {} KB: {verdict}", file.display(), saved.len() / 1024);
     }
     if failed > 0 {
         bail!("{failed} of {} files did not round-trip", files.len());

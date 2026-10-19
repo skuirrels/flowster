@@ -4,7 +4,7 @@ import { CanvasView, PX_PER_INCH, type CanvasHandle, type Tool } from "./canvas/
 import { PackageView } from "./chrome/PackageView";
 import type { EngineClient } from "./engine/client";
 import type { Command, DisplayList, DocInfo, OpenResult, PackageInfo, PageInfo, SyncState } from "./engine/protocol";
-import { inTauri, pickDocument, type PickedFile } from "./host";
+import { inTauri, pickDocument, saveDocument, type PickedFile } from "./host";
 
 interface OpenDoc {
   open: OpenResult;
@@ -52,6 +52,7 @@ export function App({ engine }: { engine: EngineClient }) {
   const [tool, setTool] = useState<Tool>("select");
   const [selection, setSelection] = useState<number[]>([]);
   const [editing, setEditing] = useState<TextEdit | null>(null);
+  const [savedAs, setSavedAs] = useState<string | null>(null);
   /** Bumped after every change so the page is fetched again. */
   const [version, setVersion] = useState(0);
   const canvas = useRef<CanvasHandle>(null);
@@ -177,6 +178,19 @@ export function App({ engine }: { engine: EngineClient }) {
     [doc, engine, refreshInfo],
   );
 
+  const onSave = useCallback(async () => {
+    if (!doc) return;
+    setError(null);
+    try {
+      const bytes = await engine.save(doc.open.doc);
+      const stem = doc.info.fileName.replace(/\.[^.]+$/, "");
+      const saved = await saveDocument(`${stem}.vsdx`, bytes);
+      if (saved) setSavedAs(saved);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [doc, engine]);
+
   const deleteSelection = useCallback(() => {
     if (selection.length > 0) void exec({ kind: "deleteShapes", page, shapes: selection });
   }, [exec, page, selection]);
@@ -219,6 +233,9 @@ export function App({ engine }: { engine: EngineClient }) {
       if (mod && key === "o") {
         e.preventDefault();
         void onOpen();
+      } else if (mod && key === "s") {
+        e.preventDefault();
+        void onSave();
       } else if (mod && key === "n") {
         e.preventDefault();
         void onNew();
@@ -258,7 +275,7 @@ export function App({ engine }: { engine: EngineClient }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [doc, exec, onOpen, onNew, stepZoom, deleteSelection, editText, selection]);
+  }, [doc, exec, onOpen, onNew, onSave, stepZoom, deleteSelection, editText, selection]);
 
   return (
     <div
@@ -277,6 +294,9 @@ export function App({ engine }: { engine: EngineClient }) {
         </button>
         <button type="button" onClick={onOpen} disabled={busy} title="Open (Ctrl+O)">
           {busy ? "Opening…" : "Open…"}
+        </button>
+        <button type="button" onClick={onSave} disabled={!doc || doc.pages.length === 0} title="Save as .vsdx (Ctrl+S)">
+          Save
         </button>
         <button type="button" onClick={() => exec({ kind: "undo" })} disabled={!undo.canUndo} title="Undo (Ctrl+Z)">
           Undo
@@ -433,6 +453,7 @@ export function App({ engine }: { engine: EngineClient }) {
           </span>
         )}
         {sync && <span>{sync === "local" ? "Local document" : sync}</span>}
+        {savedAs && <span>Saved as {savedAs}</span>}
         {undo.labels[0] && <span>Undo: {undo.labels[0]}</span>}
         {dl && dl.warnings.length > 0 && <span title={dl.warnings.join("\n")}>{dl.warnings.length} warnings</span>}
         {hash && <span title="Derived-state determinism hash">State hash {hash}</span>}

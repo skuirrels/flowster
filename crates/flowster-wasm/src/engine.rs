@@ -152,6 +152,17 @@ impl Engine {
         events
     }
 
+    /// The document as a `.vsdx` package (File > Save, SPEC §19.2): what the
+    /// CRDT holds now. Returns the suggested file name and the bytes.
+    pub fn save(&self, doc: &str) -> Result<(String, Vec<u8>), String> {
+        let d = self.docs.get(doc).ok_or_else(|| format!("no document {doc}"))?;
+        let model = d.model.as_ref().ok_or("this file has no drawing to save")?;
+        let title = d.doc.meta().get("title").cloned().unwrap_or_else(|| "Drawing".into());
+        let bytes = flowster_vsdx::writer::write_vsdx(model, d.doc.theme_xml(), &title)?;
+        let stem = d.file_name.rsplit_once('.').map_or(d.file_name.as_str(), |(s, _)| s);
+        Ok((format!("{stem}.vsdx"), bytes))
+    }
+
     pub fn handle(&mut self, id: u32, req: EngineRequest) -> Vec<EngineEvent> {
         match req {
             EngineRequest::Open { .. } => error(id, "open needs file bytes; use Engine::open"),
@@ -205,7 +216,7 @@ impl Engine {
                 }
             }
             EngineRequest::Gesture { .. } => vec![EngineEvent::Reply { id, result: Value::Null }],
-            EngineRequest::Save { .. } => error(id, "Saving arrives in M2 (SPEC §19.2)"),
+            EngineRequest::Save { .. } => error(id, "save returns bytes; use Engine::save"),
             EngineRequest::Export { .. } => error(id, "Export arrives in M1 (SPEC §19.3)"),
             EngineRequest::Close { doc } => {
                 self.docs.remove(&doc);
@@ -290,6 +301,24 @@ mod tests {
         e.handle(4, EngineRequest::Exec { doc: doc.clone(), cmd: Command::Undo });
         let ev = e.handle(5, EngineRequest::Query { doc, q: Query::PageDisplayList { page: 0 } });
         assert_eq!(reply(&ev)["shapes"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn a_new_drawing_saves_as_a_vsdx_that_reads_back() {
+        use flowster_core::command::ShapeKind;
+        let mut e = Engine::new();
+        let ev = e.handle(1, EngineRequest::New { title: Some("Plan".into()) });
+        let doc = reply(&ev)["doc"].as_str().unwrap().to_owned();
+        let add = Command::AddShape { page: 0, shape: ShapeKind::Ellipse, x: 1.0, y: 1.0, w: 2.0, h: 1.0 };
+        e.handle(2, EngineRequest::Exec { doc: doc.clone(), cmd: add });
+        let set = Command::SetText { page: 0, shape: 1, text: "Hi".into() };
+        e.handle(3, EngineRequest::Exec { doc: doc.clone(), cmd: set });
+        let (name, bytes) = e.save(&doc).unwrap();
+        assert_eq!(name, "Plan.vsdx");
+        let back = flowster_vsdx::visio::read_document(&flowster_vsdx::OpcPackage::open(bytes).unwrap()).unwrap();
+        let s = &back.pages[0].shapes[0];
+        assert_eq!(s.text, Some(vec![flowster_core::model::TextPiece::Text("Hi".into())]));
+        assert_eq!(s.sheet.sections[0].rows[0].t.as_deref(), Some("Ellipse"));
     }
 
     #[test]

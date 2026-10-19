@@ -18,6 +18,7 @@ mod part_name;
 mod rels;
 mod theme;
 pub mod visio;
+pub mod writer;
 
 use std::collections::HashMap;
 use std::io::{Cursor, Read, Seek};

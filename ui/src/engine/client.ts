@@ -57,6 +57,11 @@ export class EngineClient {
     return this.request<ChangeSummary | null>({ kind: "exec", doc, cmd });
   }
 
+  /** The document as .vsdx bytes. */
+  save(doc: DocId): Promise<ArrayBuffer> {
+    return this.request<ArrayBuffer>({ kind: "save", doc, format: "vsdx" });
+  }
+
   close(doc: DocId): Promise<void> {
     return this.request<void>({ kind: "close", doc });
   }

@@ -57,6 +57,45 @@ async fn pick_document(app: AppHandle, picked: State<'_, PickedFiles>) -> Result
     Ok(Some(PickedDocument { token, file_name }))
 }
 
+/// Shows the platform's save dialog and writes the document the page sends
+/// (a raw binary IPC body). The page suggests a file name but never sees or
+/// chooses the path, so it can only write where the user just said to.
+#[tauri::command]
+async fn save_document(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<Option<String>, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected the document bytes".into());
+    };
+    let bytes = bytes.clone();
+    // Only a default for the dialog: keep the last path component.
+    let suggested = request
+        .headers()
+        .get("x-file-name")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|n| n.rsplit(['/', '\\']).next())
+        .filter(|n| !n.is_empty())
+        .unwrap_or("Drawing.vsdx")
+        .to_owned();
+    let dialog = app.dialog().clone();
+    let choice = tauri::async_runtime::spawn_blocking(move || {
+        dialog
+            .file()
+            .set_title("Save")
+            .set_file_name(&suggested)
+            .add_filter("Visio drawing", &["vsdx"])
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(choice) = choice else { return Ok(None) };
+    let path = choice.into_path().map_err(|e| e.to_string())?;
+    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || std::fs::write(&path, &bytes))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    Ok(Some(file_name))
+}
+
 #[tauri::command]
 async fn read_picked_document(token: u64, picked: State<'_, PickedFiles>) -> Result<Response, String> {
     let path = picked
@@ -83,7 +122,7 @@ pub fn run() {
             app.manage(PickedFiles::default());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![pick_document, read_picked_document])
+        .invoke_handler(tauri::generate_handler![pick_document, read_picked_document, save_document])
         .run(tauri::generate_context!())
         .expect("error while running Flowster");
 }

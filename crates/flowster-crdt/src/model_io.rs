@@ -752,6 +752,17 @@ impl Reader<'_> {
     }
 }
 
+/// The theme part the document stores (raw XML), for writing it back out.
+pub fn theme_xml<'a>(doc: &LoroDoc, assets: &'a Assets) -> Option<&'a [u8]> {
+    entries(&doc.get_map(schema::THEMES)).into_iter().find_map(|(_, v)| match v {
+        ValueOrContainer::Value(LoroValue::Map(t)) => match t.get("asset") {
+            Some(LoroValue::String(h)) => assets.blobs.get(h.as_str()).map(|b| b.bytes.as_slice()),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
 /// Reads the model back from `doc`. `parse_theme` turns the theme asset into a
 /// [`Theme`] (the parser lives in `flowster-vsdx`).
 pub fn read_model(doc: &LoroDoc, assets: &Assets, parse_theme: impl Fn(&[u8]) -> Option<Theme>) -> Model {

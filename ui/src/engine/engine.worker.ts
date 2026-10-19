@@ -5,7 +5,7 @@ import init, { WasmEngine } from "./wasm/flowster_wasm.js";
 import type { EngineEvent, WorkerMessage } from "./protocol";
 
 interface WorkerScope {
-  postMessage(message: EngineEvent): void;
+  postMessage(message: EngineEvent, transfer?: Transferable[]): void;
   onmessage: ((ev: MessageEvent<WorkerMessage>) => void) | null;
 }
 const scope = self as unknown as WorkerScope;
@@ -15,6 +15,11 @@ const engine: Promise<WasmEngine> = init().then(() => new WasmEngine());
 function handle(e: WasmEngine, { id, req }: WorkerMessage): EngineEvent[] {
   if (req.kind === "open") {
     return e.open(id, req.fileName, new Uint8Array(req.bytes)) as EngineEvent[];
+  }
+  if (req.kind === "save") {
+    // The package goes back as a transferable ArrayBuffer (no copy).
+    const bytes = e.saveBytes(req.doc) as Uint8Array;
+    return [{ kind: "reply", id, result: bytes.buffer }];
   }
   return e.request(id, req) as EngineEvent[];
 }
@@ -26,5 +31,8 @@ scope.onmessage = async (ev) => {
   } catch (err) {
     events = [{ kind: "error", id: ev.data.id, message: `engine failure: ${String(err)}` }];
   }
-  for (const out of events) scope.postMessage(out);
+  for (const out of events) {
+    const transfer = out.kind === "reply" && out.result instanceof ArrayBuffer ? [out.result] : [];
+    scope.postMessage(out, transfer);
+  }
 };
