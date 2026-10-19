@@ -19,8 +19,8 @@ use std::sync::Arc;
 use flowster_render::text_layout::{FontFace, GlyphRun, PlacedGlyph, TextLayout};
 use flowster_render::{DisplayList, Item, Paragraph};
 use parley::{
-    Alignment, AlignmentOptions, FontContext, FontFamily, FontFamilyName, FontStyle, FontWeight, GenericFamily,
-    IndentOptions, LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty,
+    Alignment, AlignmentOptions, FontContext, FontFamily, FontFamilyName, FontFeatures, FontStyle, FontWeight,
+    GenericFamily, IndentOptions, LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty,
 };
 
 /// Points per inch: layout runs in points, results are returned in inches.
@@ -149,6 +149,9 @@ impl TextEngine {
         let max_w = ((inner_w - indent) * PT).max(1.0) as f32;
         let mut builder = self.layout.ranged_builder(&mut self.fonts, &text, 1.0, false);
         builder.push_default(StyleProperty::FontFamily(family(&first.font)));
+        // Visio does not apply the fonts' pair kerning (measured: runs without
+        // kerning pairs match its widths exactly, sentences only without `kern`).
+        builder.push_default(StyleProperty::FontFeatures(FontFeatures::Source(Cow::Borrowed("\"kern\" off"))));
         builder.push_default(StyleProperty::FontSize((first.size * PT) as f32));
         builder.push_default(StyleProperty::LineHeight(if para.line_spacing < 0.0 {
             LineHeight::FontSizeRelative(-para.line_spacing as f32)

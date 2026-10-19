@@ -152,8 +152,14 @@ function fontFor(run: Run): string {
   return `${style}${run.size * TEXT_UNITS}px "${run.font}", ${FONT_FALLBACKS}`;
 }
 
-function measure(ctx: CanvasRenderingContext2D, run: Run, text: string): number {
+/** Sets a run's font. Visio does not apply pair kerning, so neither do we. */
+function setFont(ctx: CanvasRenderingContext2D, run: Run): void {
   ctx.font = fontFor(run);
+  ctx.fontKerning = "none";
+}
+
+function measure(ctx: CanvasRenderingContext2D, run: Run, text: string): number {
+  setFont(ctx, run);
   return ctx.measureText(text).width;
 }
 
@@ -235,7 +241,7 @@ function drawText(ctx: CanvasRenderingContext2D, t: TextItem, pageToDevice: Affi
     }
     const baseline = y + line.ascent;
     for (const p of line.pieces) {
-      ctx.font = fontFor(p.run);
+      setFont(ctx, p.run);
       ctx.fillStyle = css(p.run.color);
       ctx.fillText(p.text, x, baseline);
       if (p.run.underline || p.run.strike) {

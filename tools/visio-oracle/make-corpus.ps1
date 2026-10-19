@@ -499,6 +499,36 @@ try {
   Set-Formula $bar "FillForegnd" "RGB(0,0,0)"
   Export-Doc $doc "arrows"
   $doc.Close()
+
+  # ---------------------------------------------------------------- fonts.vsdx
+  # Unwrapped lines in three fonts at 12 and 36 pt: a sentence with kerning
+  # pairs and runs of narrow and wide letters, for measuring advance widths.
+  $doc = $app.Documents.Add("")
+  $page = $doc.Pages.Item(1)
+  Set-Formula $page.PageSheet "PageWidth" "16 in"
+  Set-Formula $page.PageSheet "PageHeight" "8 in"
+  $texts = "The quick brown fox jumps over the lazy dog. AV To Wa", ("i" * 40), ("m" * 30)
+  $row = 0
+  foreach ($f in "Calibri", "Times New Roman", "Arial") {
+    foreach ($sz in "12 pt", "36 pt") {
+      foreach ($t in $texts) {
+        $y = 7.6 - 0.37 * $row
+        $s = $page.DrawRectangle(0.5, $y - 0.15, 15.5, $y + 0.15)
+        $s.Text = $t
+        Set-Formula $s "LinePattern" "0"
+        Set-Formula $s "FillPattern" "0"
+        Set-Formula $s "Para.HorzAlign" "0"
+        Set-Formula $s "Char.Size" $sz
+        Set-CharProp $s.Characters 0 $doc.Fonts.Item($f).ID
+        $row++
+      }
+    }
+  }
+  $bar = $page.DrawRectangle(0.5, 0.2, 15.5, 0.3)
+  Set-Formula $bar "LinePattern" "0"
+  Set-Formula $bar "FillForegnd" "RGB(0,0,0)"
+  Export-Doc $doc "fonts"
+  $doc.Close()
 }
 finally {
   $app.Quit()
