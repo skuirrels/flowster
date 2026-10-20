@@ -64,6 +64,9 @@ pub enum Query {
     PageDisplayList { page: usize },
     /// The built-in shape library with preview outlines.
     Library,
+    /// Top-level shapes as model data, back to front (for the clipboard).
+    #[serde(rename_all = "camelCase")]
+    CopyShapes { page: usize, shapes: Vec<u32> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

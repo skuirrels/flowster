@@ -52,6 +52,19 @@
       "icons/icon.ico"
     ],
     "category": "Productivity",
-    "shortDescription": "Diagramming"
+    "shortDescription": "Diagramming",
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_CONTENTS_OF_~/.tauri/flowster-updater.key.pub",
+      "endpoints": [
+        "https://skuirrels.github.io/flowster-releases/updates/{{target}}-{{arch}}.json",
+        "https://skuirrels.github.io/flowster-releases/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

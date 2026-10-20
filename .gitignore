@@ -9,3 +9,6 @@ node_modules/
 
 # Reverse-engineering notes stay local (SPEC §0, risk R4)
 /docs/re/
+
+# Installers built by scripts/release-kit
+/release/

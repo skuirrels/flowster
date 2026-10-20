@@ -43,8 +43,26 @@ export type Command =
   | { kind: "autoConnect"; page: number; shape: number; direction: "up" | "down" | "left" | "right" }
   | { kind: "deleteShapes"; page: number; shapes: number[] }
   | { kind: "setText"; page: number; shape: number; text: string }
+  /** Aligns to the first shape (the primary selection). */
+  | { kind: "alignShapes"; page: number; shapes: number[]; align: Align }
+  | { kind: "distributeShapes"; page: number; shapes: number[]; axis: Axis }
+  | { kind: "rotateShapes"; page: number; shapes: number[]; direction: "left" | "right" }
+  | { kind: "flipShapes"; page: number; shapes: number[]; axis: Axis }
+  | { kind: "reorderShapes"; page: number; shapes: number[]; to: "front" | "back" | "forward" | "backward" }
+  | { kind: "groupShapes"; page: number; shapes: number[] }
+  | { kind: "ungroupShapes"; page: number; shapes: number[] }
+  /** A blank foreground page after `after` (after the last foreground page when absent). */
+  | { kind: "addPage"; after?: number }
+  | { kind: "deletePage"; page: number }
+  | { kind: "renamePage"; page: number; name: string }
+  | { kind: "setPageHidden"; page: number; hidden: boolean }
+  /** Pastes shapes from the `copyShapes` query, moved by (dx, dy) inches; they get new ids. */
+  | { kind: "insertShapes"; page: number; shapes: ClipShape[]; dx: number; dy: number }
   | { kind: "undo" }
   | { kind: "redo" };
+
+export type Align = "left" | "center" | "right" | "top" | "middle" | "bottom";
+export type Axis = "horizontal" | "vertical";
 
 // ---- queries ---------------------------------------------------------------
 
@@ -54,7 +72,11 @@ export type Query =
   | { kind: "derivedStateHash" }
   | { kind: "pages" }
   | { kind: "pageDisplayList"; page: number }
-  | { kind: "library" };
+  | { kind: "library" }
+  | { kind: "copyShapes"; page: number; shapes: number[] };
+
+/** A shape as model data, for the clipboard (opaque to the UI). */
+export type ClipShape = Record<string, unknown>;
 
 /** A Shapes panel entry; `preview` is an SVG path in a `width` × `height` box (y down). */
 export interface LibraryEntry {
@@ -215,6 +237,8 @@ export interface PageInfo {
   name: string;
   background: boolean;
   backPage: number | null;
+  /** Hidden from the page tabs. */
+  hidden: boolean;
   width: number;
   height: number;
 }
@@ -234,6 +258,9 @@ export interface ShapeBox {
   beginGlue?: number;
   endGlue?: number;
   connector?: boolean;
+  group?: boolean;
+  /** The `Angle` cell, radians counter-clockwise (absent: 0). */
+  angle?: number;
   format: ShapeFormat;
 }
 
@@ -280,7 +307,9 @@ export type QueryResult<Q extends Query> = Q extends { kind: "packageParts" }
           ? DisplayList
           : Q extends { kind: "library" }
             ? LibraryEntry[]
-            : never;
+            : Q extends { kind: "copyShapes" }
+              ? ClipShape[]
+              : never;
 
 // ---- requests ---------------------------------------------------------------
 
@@ -311,6 +340,8 @@ export interface ChangeSummary {
   opened?: { fileName: string; format: string; partCount: number };
   /** The shape a command created: [page, id]. */
   created?: [number, number];
+  /** The page list changed; the page to show. */
+  page?: number;
 }
 
 export type SyncState = "local" | "connecting" | "live" | "offline";

@@ -1,17 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 
-import { CanvasView, PX_PER_INCH, type CanvasHandle, type Tool } from "./canvas/CanvasView";
-import { FormatBar } from "./chrome/FormatBar";
+import { CanvasView, gridStep, PX_PER_INCH, type CanvasHandle, type Tool } from "./canvas/CanvasView";
+import { pageBounds } from "./canvas/edit";
+import { CommandPalette, type PaletteItem } from "./chrome/CommandPalette";
+import { fmt, FormatBar, hex } from "./chrome/FormatBar";
 import { Icon, shortcut, type IconName } from "./chrome/icons";
 import { Inspector } from "./chrome/Inspector";
-import { MenuBar, type Menu } from "./chrome/MenuBar";
+import { MenuBar, type Menu, type MenuEntry } from "./chrome/MenuBar";
 import { PackageView } from "./chrome/PackageView";
+import { DropButton, PopupMenu } from "./chrome/Popup";
 import { ShapesPanel } from "./chrome/ShapesPanel";
 import { AboutDialog, ShortcutsDialog, Welcome } from "./chrome/Welcome";
 import type { EngineClient } from "./engine/client";
 import type {
+  Align,
+  Axis,
   CellEdit,
   ChangeSummary,
+  ClipShape,
   Command,
   DisplayList,
   DocInfo,
@@ -19,6 +25,7 @@ import type {
   OpenResult,
   PackageInfo,
   PageInfo,
+  ShapeFormat,
   SyncState,
 } from "./engine/protocol";
 import { inTauri, pickDocument, saveDocument, type PickedFile } from "./host";
@@ -39,6 +46,27 @@ interface UndoInfo {
 type Mode = "drawing" | "package";
 
 const ZOOM_STEPS = [0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8];
+
+/** How far each paste or duplicate is offset, inches (right and down). */
+const PASTE_STEP = 0.25;
+
+/** The cell edits that give a shape the formatting `f` (Paste style). */
+function styleEdits(f: ShapeFormat): CellEdit[] {
+  return [
+    ...fmt.fill(hex(f.fill)),
+    ...fmt.line(hex(f.line)),
+    ...(f.line ? [...fmt.weight(f.lineWeight), ...fmt.pattern(f.linePattern)] : []),
+    ...fmt.rounding(f.rounding),
+    ...fmt.font(f.font),
+    ...fmt.size(f.size),
+    ...fmt.textColor(hex(f.textColor) ?? "#000000"),
+    ...fmt.style(f, {}),
+    ...fmt.align(f.align),
+    ...fmt.valign(f.valign),
+    ...fmt.beginArrow(f.beginArrow),
+    ...fmt.endArrow(f.endArrow),
+  ];
+}
 
 /** Drawing tools, with Visio's shortcuts. */
 const TOOLS: { tool: Tool; label: string; key: string; icon: IconName }[] = [
@@ -110,6 +138,26 @@ export function App({ engine }: { engine: EngineClient }) {
   /** A shape to start editing as soon as it appears (a new text box). */
   const [pendingEdit, setPendingEdit] = useState<number | null>(null);
   const [dialog, setDialog] = useState<"shortcuts" | "about" | null>(null);
+  const [grid, setGrid] = useState(true);
+  const [rulers, setRulers] = useState(true);
+  /** Refit the page when the window (or the canvas) changes size; zooming or panning turns it off. */
+  const [autoFit, setAutoFit] = useState(true);
+  const [snapGrid, setSnapGrid] = useState(true);
+  const [smartGuides, setSmartGuides] = useState(true);
+  const [minimap, setMinimap] = useState(true);
+  const snap = useMemo(() => ({ grid: snapGrid, guides: smartGuides }), [snapGrid, smartGuides]);
+  /** The command palette, or the quick-add shape search at a point. */
+  const [palette, setPalette] = useState<{ kind: "commands" } | { kind: "shapes"; client: [number, number]; at: [number, number] } | null>(null);
+  const closePalette = useCallback(() => setPalette(null), []);
+  /** Copied shapes (model data, so cut shapes can still be pasted) and how often they have been pasted. */
+  const clip = useRef<{ shapes: ClipShape[]; page: number; pastes: number } | null>(null);
+  const [hasClip, setHasClip] = useState(false);
+  /** Copied formatting (Copy style). */
+  const [styleClip, setStyleClip] = useState<ShapeFormat | null>(null);
+  /** The page tab menu: the page it is for (null: the hidden-pages list) and where it opens. */
+  const [pageMenu, setPageMenu] = useState<{ page: number | null; at: [number, number] } | null>(null);
+  /** The page whose tab is being renamed. */
+  const [renaming, setRenaming] = useState<number | null>(null);
   /** Bumped after every change so the page is fetched again. */
   const [version, setVersion] = useState(0);
   const canvas = useRef<CanvasHandle>(null);
@@ -124,14 +172,17 @@ export function App({ engine }: { engine: EngineClient }) {
   );
 
   // Fetch the display list whenever the document, page or content changes.
+  // (Keyed on the document's id: its info refreshing after an edit is not a change.)
+  const docId = doc?.open.doc;
+  const hasPages = (doc?.pages.length ?? 0) > 0;
   useEffect(() => {
-    if (!doc || doc.pages.length === 0) {
+    if (!docId || !hasPages) {
       setDl(null);
       return;
     }
     let cancelled = false;
     engine
-      .query(doc.open.doc, { kind: "pageDisplayList", page })
+      .query(docId, { kind: "pageDisplayList", page })
       .then((list) => {
         if (cancelled) return;
         setDl(list);
@@ -142,7 +193,7 @@ export function App({ engine }: { engine: EngineClient }) {
     return () => {
       cancelled = true;
     };
-  }, [doc, page, engine, version]);
+  }, [docId, hasPages, page, engine, version]);
 
   // The shape library, once a document is open.
   useEffect(() => {
@@ -153,10 +204,15 @@ export function App({ engine }: { engine: EngineClient }) {
       .catch(() => {});
   }, [doc, engine, library.length]);
 
+  /** Re-reads the document's info and page list after a change. */
   const refreshInfo = useCallback(
     async (docId: string) => {
-      const info = await engine.query(docId, { kind: "docInfo" });
-      setDoc((d) => (d && d.open.doc === docId ? { ...d, info } : d));
+      const [info, pages] = await Promise.all([
+        engine.query(docId, { kind: "docInfo" }),
+        engine.query(docId, { kind: "pages" }),
+      ]);
+      setDoc((d) => (d && d.open.doc === docId ? { ...d, info, pages } : d));
+      return pages;
     },
     [engine],
   );
@@ -235,17 +291,26 @@ export function App({ engine }: { engine: EngineClient }) {
       if (!doc) return null;
       try {
         const changes = await engine.exec(doc.open.doc, cmd);
+        // The page list first, so the page fetched next still exists.
+        const pages = await refreshInfo(doc.open.doc);
+        const next = changes?.page ?? Math.min(page, Math.max(0, pages.length - 1));
+        if (next !== page) {
+          setSelection([]);
+          setPage(next);
+        }
         setVersion((v) => v + 1);
         setDirty(true);
         if (changes?.created) setSelection([changes.created[1]]);
-        await refreshInfo(doc.open.doc);
+        if ((cmd.kind === "ungroupShapes" || cmd.kind === "insertShapes") && changes?.shapes) {
+          setSelection(changes.shapes.map(Number));
+        }
         return changes;
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         return null;
       }
     },
-    [doc, engine, refreshInfo],
+    [doc, engine, page, refreshInfo],
   );
 
   /** Runs a canvas command; a new text box opens for typing straight away. */
@@ -310,6 +375,157 @@ export function App({ engine }: { engine: EngineClient }) {
     if (selection.length > 0) void exec({ kind: "deleteShapes", page, shapes: selection });
   }, [exec, page, selection]);
 
+  // Clipboard. Shapes travel as model data, so cut shapes paste back and
+  // copies paste onto other pages. Each paste lands a step further along.
+  const copyOf = useCallback(
+    async (ids: number[]) => (doc && ids.length > 0 ? engine.query(doc.open.doc, { kind: "copyShapes", page, shapes: ids }) : []),
+    [doc, engine, page],
+  );
+  const onCopy = useCallback(async () => {
+    const shapes = await copyOf(selection);
+    if (shapes.length > 0) {
+      clip.current = { shapes, page, pastes: 0 };
+      setHasClip(true);
+    }
+  }, [copyOf, page, selection]);
+  const onCut = useCallback(async () => {
+    await onCopy();
+    deleteSelection();
+  }, [deleteSelection, onCopy]);
+  const onPaste = useCallback(() => {
+    const c = clip.current;
+    if (!c) return;
+    c.pastes += 1;
+    // On another page the first paste lands where the shapes were.
+    const step = (c.page === page ? c.pastes : c.pastes - 1) * PASTE_STEP;
+    void exec({ kind: "insertShapes", page, shapes: c.shapes, dx: step, dy: -step });
+  }, [exec, page]);
+  /** Copies of shapes, moved by (dx, dy); the clipboard is left alone. */
+  const duplicate = useCallback(
+    async (ids: number[], dx = PASTE_STEP, dy = -PASTE_STEP) => {
+      const shapes = await copyOf(ids);
+      if (shapes.length > 0) await exec({ kind: "insertShapes", page, shapes, dx, dy });
+    },
+    [copyOf, exec, page],
+  );
+  const pasteStyle = useCallback(() => {
+    if (styleClip) applyFormat(styleEdits(styleClip));
+  }, [applyFormat, styleClip]);
+
+  /** Moves the selection by grid steps (Shift: a major step). */
+  const nudge = useCallback(
+    (dx: number, dy: number, big: boolean) => {
+      if (selection.length === 0) return;
+      const step = gridStep(zoom || PX_PER_INCH);
+      const k = big ? step.major : step.minor;
+      void exec({ kind: "moveShapes", page, shapes: selection, dx: dx * k, dy: dy * k });
+    },
+    [exec, page, selection, zoom],
+  );
+
+  /** Zooms to the selection, or to all shapes when nothing is selected. */
+  const zoomToSelection = useCallback(() => {
+    const boxes = dl?.shapes.filter((b) => selection.length === 0 || selection.includes(b.id)) ?? [];
+    if (boxes.length === 0) return canvas.current?.fit();
+    const rs = boxes.map(pageBounds);
+    canvas.current?.zoomTo([
+      Math.min(...rs.map((r) => r[0])),
+      Math.min(...rs.map((r) => r[1])),
+      Math.max(...rs.map((r) => r[2])),
+      Math.max(...rs.map((r) => r[3])),
+    ]);
+  }, [dl, selection]);
+
+  // Arrange: commands on the selection (alignment is to the first selected shape).
+  const arrange = useMemo(() => {
+    const shapes = selection;
+    const run = (c: Command) => void exec(c);
+    const groups = shapes.filter((id) => dl?.shapes.find((b) => b.id === id)?.group);
+    return {
+      align: (align: Align) => run({ kind: "alignShapes", page, shapes, align }),
+      distribute: (axis: Axis) => run({ kind: "distributeShapes", page, shapes, axis }),
+      rotate: (direction: "left" | "right") => run({ kind: "rotateShapes", page, shapes, direction }),
+      flip: (axis: Axis) => run({ kind: "flipShapes", page, shapes, axis }),
+      reorder: (to: "front" | "back" | "forward" | "backward") => run({ kind: "reorderShapes", page, shapes, to }),
+      group: () => run({ kind: "groupShapes", page, shapes }),
+      ungroup: () => run({ kind: "ungroupShapes", page, shapes: groups }),
+      canAlign: shapes.length >= 2,
+      canDistribute: shapes.length >= 3,
+      any: shapes.length > 0,
+      canUngroup: groups.length > 0,
+    };
+  }, [dl, exec, page, selection]);
+
+  const { alignItems, positionItems, frontItems, backItems, groupItems } = useMemo(() => {
+    const alignItems: MenuEntry[] = [
+      { label: "Align left", icon: "shapeAlignLeft", run: () => arrange.align("left"), disabled: !arrange.canAlign },
+      { label: "Align centre", icon: "shapeAlignCenter", run: () => arrange.align("center"), disabled: !arrange.canAlign },
+      { label: "Align right", icon: "shapeAlignRight", run: () => arrange.align("right"), disabled: !arrange.canAlign },
+      "separator",
+      { label: "Align top", icon: "shapeAlignTop", run: () => arrange.align("top"), disabled: !arrange.canAlign },
+      { label: "Align middle", icon: "shapeAlignMiddle", run: () => arrange.align("middle"), disabled: !arrange.canAlign },
+      { label: "Align bottom", icon: "shapeAlignBottom", run: () => arrange.align("bottom"), disabled: !arrange.canAlign },
+    ];
+    const positionItems: MenuEntry[] = [
+      { label: "Distribute horizontally", icon: "distributeH", run: () => arrange.distribute("horizontal"), disabled: !arrange.canDistribute },
+      { label: "Distribute vertically", icon: "distributeV", run: () => arrange.distribute("vertical"), disabled: !arrange.canDistribute },
+      "separator",
+      { label: "Rotate right 90°", icon: "rotateRight", keys: "Ctrl+R", run: () => arrange.rotate("right"), disabled: !arrange.any },
+      { label: "Rotate left 90°", icon: "rotateLeft", keys: "Ctrl+L", run: () => arrange.rotate("left"), disabled: !arrange.any },
+      { label: "Flip vertical", icon: "flipV", keys: "Ctrl+J", run: () => arrange.flip("vertical"), disabled: !arrange.any },
+      { label: "Flip horizontal", icon: "flipH", keys: "Ctrl+H", run: () => arrange.flip("horizontal"), disabled: !arrange.any },
+    ];
+    const frontItems: MenuEntry[] = [
+      { label: "Bring to front", icon: "front", keys: "Ctrl+Shift+F", run: () => arrange.reorder("front"), disabled: !arrange.any },
+      { label: "Bring forward", icon: "forward", run: () => arrange.reorder("forward"), disabled: !arrange.any },
+    ];
+    const backItems: MenuEntry[] = [
+      { label: "Send to back", icon: "back", keys: "Ctrl+Shift+B", run: () => arrange.reorder("back"), disabled: !arrange.any },
+      { label: "Send backward", icon: "backward", run: () => arrange.reorder("backward"), disabled: !arrange.any },
+    ];
+    const groupItems: MenuEntry[] = [
+      { label: "Group", icon: "group", keys: "Ctrl+G", run: arrange.group, disabled: !arrange.canAlign },
+      { label: "Ungroup", icon: "ungroup", keys: "Ctrl+Shift+U", run: arrange.ungroup, disabled: !arrange.canUngroup },
+    ];
+    return { alignItems, positionItems, frontItems, backItems, groupItems };
+  }, [arrange]);
+
+  const closePageMenu = useCallback(() => setPageMenu(null), []);
+
+  /** Shows a page from its tab (or the page menu). */
+  const showPage = useCallback((index: number) => {
+    setPage(index);
+    setMode("drawing");
+  }, []);
+
+  /** The page tab menu's entries: for one page, or (`null`) the list of hidden pages. */
+  const pageMenuItems = (index: number | null): MenuEntry[] => {
+    const pages = doc?.pages ?? [];
+    const visible = pages.filter((p) => !p.hidden && !p.background).length;
+    const unhide: MenuEntry[] = pages
+      .filter((p) => p.hidden)
+      .map((p) => ({
+        label: `Unhide “${p.name}”`,
+        icon: "eye",
+        run: () => void exec({ kind: "setPageHidden", page: p.index, hidden: false }),
+      }));
+    if (index === null) return unhide;
+    const p = pages[index];
+    const lastForeground = !p.background && pages.filter((q) => !q.background).length === 1;
+    const items: MenuEntry[] = [
+      { label: "Insert page", icon: "plus", run: () => void exec({ kind: "addPage", after: index }) },
+      { label: "Rename", icon: "rename", run: () => setRenaming(index) },
+      {
+        label: "Hide",
+        icon: "eyeOff",
+        run: () => void exec({ kind: "setPageHidden", page: index, hidden: true }),
+        disabled: !p.background && visible <= 1,
+      },
+      { label: "Delete", icon: "trash", run: () => void exec({ kind: "deletePage", page: index }), disabled: lastForeground },
+    ];
+    return unhide.length ? [...items, "separator", ...unhide] : items;
+  };
+
   const selectAll = useCallback(() => {
     if (dl) setSelection(dl.shapes.map((b) => b.id));
   }, [dl]);
@@ -370,10 +586,39 @@ export function App({ engine }: { engine: EngineClient }) {
       } else if (mod && key === "n") {
         e.preventDefault();
         void onNew();
+      } else if (mod && (key === "k" || key === "/") && doc) {
+        // Command palette (Ctrl+K, or Figma's Ctrl+/).
+        e.preventDefault();
+        setPalette((p) => (p ? null : { kind: "commands" }));
+      } else if (mod && e.altKey && (e.code === "KeyC" || e.code === "KeyV") && drawing && !inInput) {
+        // Copy and paste style (Figma's Ctrl+Alt+C / V). By code: Alt changes the key on a Mac.
+        e.preventDefault();
+        if (e.code === "KeyV") pasteStyle();
+        else if (selectedFormat) setStyleClip(selectedFormat);
+      } else if (mod && !e.altKey && !e.shiftKey && ["c", "x", "v", "d"].includes(key) && drawing && !inInput) {
+        e.preventDefault();
+        if (key === "c") void onCopy();
+        else if (key === "x") void onCut();
+        else if (key === "v") onPaste();
+        else void duplicate(selection);
+      } else if (!mod && !e.altKey && e.key.startsWith("Arrow") && drawing && !inInput && selection.length > 0) {
+        // Nudge by a grid step; Shift for a big step.
+        e.preventDefault();
+        const [dx, dy] = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[e.key] ?? [0, 0];
+        nudge(dx, dy, e.shiftKey);
+      } else if (e.shiftKey && !mod && !e.altKey && (e.code === "Digit1" || e.code === "Digit2") && drawing && !inInput) {
+        // Figma: Shift+1 shows everything, Shift+2 the selection.
+        e.preventDefault();
+        if (e.code === "Digit1") canvas.current?.fit();
+        else zoomToSelection();
       } else if (toolKey && drawing && !inInput) {
         e.preventDefault();
         setTool(toolKey.tool);
-      } else if (mod && (key === "b" || key === "i" || key === "u") && drawing && !inInput && selectedFormat) {
+      } else if (mod && drawing && !inInput && arrangeKey(key, e.shiftKey)) {
+        // Arrange (Visio's keys). These shadow browser shortcuts (Ctrl+R, Ctrl+H …) only while drawing.
+        e.preventDefault();
+        if (arrange.any) arrangeKey(key, e.shiftKey)!();
+      } else if (mod && !e.shiftKey && (key === "b" || key === "i" || key === "u") && drawing && !inInput && selectedFormat) {
         e.preventDefault();
         const k = key === "b" ? "bold" : key === "i" ? "italic" : "underline";
         const f = selectedFormat;
@@ -408,14 +653,37 @@ export function App({ engine }: { engine: EngineClient }) {
         e.preventDefault();
         stepZoom(-1);
       } else if (mod && (e.key === "PageDown" || e.key === "PageUp") && doc) {
+        // Hidden pages are skipped.
         e.preventDefault();
         const n = doc.pages.length;
-        setPage((p) => (p + (e.key === "PageDown" ? 1 : n - 1)) % n);
+        const step = e.key === "PageDown" ? 1 : n - 1;
+        let p = page;
+        for (let i = 0; i < n; i++) {
+          p = (p + step) % n;
+          if (!doc.pages[p].hidden) break;
+        }
+        setPage(p);
       }
     };
+    /** The arrange command for Ctrl+key (with Shift), if any. */
+    function arrangeKey(key: string, shift: boolean): (() => void) | null {
+      if (shift) {
+        if (key === "f") return () => arrange.reorder("front");
+        if (key === "b") return () => arrange.reorder("back");
+        if (key === "u") return arrange.ungroup;
+        return null;
+      }
+      if (key === "g") return arrange.group;
+      if (key === "r") return () => arrange.rotate("right");
+      if (key === "l") return () => arrange.rotate("left");
+      if (key === "h") return () => arrange.flip("horizontal");
+      if (key === "j") return () => arrange.flip("vertical");
+      return null;
+    }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [doc, drawing, exec, onOpen, onNew, onSave, stepZoom, deleteSelection, selectAll, editText, selection, selectedFormat, applyFormat]);
+  }, [doc, drawing, exec, onOpen, onNew, onSave, stepZoom, deleteSelection, selectAll, editText, selection, selectedFormat, applyFormat, arrange, page,
+    onCopy, onCut, onPaste, duplicate, pasteStyle, nudge, zoomToSelection]);
 
   const menus: Menu[] = useMemo(
     () => [
@@ -440,6 +708,20 @@ export function App({ engine }: { engine: EngineClient }) {
           },
           { label: "Redo", icon: "redo", keys: "Ctrl+Y", run: () => void exec({ kind: "redo" }), disabled: !undo.canRedo },
           "separator",
+          { label: "Cut", icon: "cut", keys: "Ctrl+X", run: () => void onCut(), disabled: !drawing || selection.length === 0 },
+          { label: "Copy", icon: "copy", keys: "Ctrl+C", run: () => void onCopy(), disabled: !drawing || selection.length === 0 },
+          { label: "Paste", icon: "paste", keys: "Ctrl+V", run: onPaste, disabled: !drawing || !hasClip },
+          { label: "Duplicate", icon: "duplicate", keys: "Ctrl+D", run: () => void duplicate(selection), disabled: !drawing || selection.length === 0 },
+          "separator",
+          {
+            label: "Copy style",
+            icon: "brush",
+            keys: "Ctrl+Alt+C",
+            run: () => selectedFormat && setStyleClip(selectedFormat),
+            disabled: !selectedFormat,
+          },
+          { label: "Paste style", icon: "brush", keys: "Ctrl+Alt+V", run: pasteStyle, disabled: !styleClip || selection.length === 0 },
+          "separator",
           { label: "Select all", icon: "selectAll", keys: "Ctrl+A", run: selectAll, disabled: !drawing },
           { label: "Edit text", icon: "text", keys: "F2", run: () => editText(selection[0]), disabled: selection.length !== 1 },
           { label: "Delete", icon: "trash", keys: "Del", run: deleteSelection, disabled: selection.length === 0 },
@@ -451,6 +733,14 @@ export function App({ engine }: { engine: EngineClient }) {
           { label: "Zoom in", icon: "zoomIn", keys: "Ctrl++", run: () => stepZoom(1), disabled: !drawing },
           { label: "Zoom out", icon: "zoomOut", keys: "Ctrl+-", run: () => stepZoom(-1), disabled: !drawing },
           { label: "Fit page", icon: "fit", keys: "Ctrl+Shift+W", run: () => canvas.current?.fit(), disabled: !drawing },
+          { label: "Zoom to selection", icon: "focus", keys: "Shift+2", run: zoomToSelection, disabled: !drawing },
+          { label: "Fit page on resize", checked: autoFit, run: () => setAutoFit((v) => !v), disabled: !doc },
+          "separator",
+          { label: "Rulers", checked: rulers, run: () => setRulers((v) => !v), disabled: !doc },
+          { label: "Grid", checked: grid, run: () => setGrid((v) => !v), disabled: !doc },
+          { label: "Snap to grid", checked: snapGrid, run: () => setSnapGrid((v) => !v), disabled: !doc },
+          { label: "Smart guides", checked: smartGuides, run: () => setSmartGuides((v) => !v), disabled: !doc },
+          { label: "Minimap", checked: minimap, run: () => setMinimap((v) => !v), disabled: !doc },
           "separator",
           { label: "Shapes panel", checked: shapesPanel, run: () => setShapesPanel((v) => !v), disabled: !doc },
           { label: "Inspector", checked: inspector, run: () => setInspector((v) => !v), disabled: !doc },
@@ -461,27 +751,88 @@ export function App({ engine }: { engine: EngineClient }) {
       },
       {
         label: "Insert",
-        items: TOOLS.slice(1).map((t) => ({
-          label: t.label,
-          icon: t.icon,
-          keys: `Ctrl+${t.key}`,
-          run: () => {
-            setMode("drawing");
-            setTool(t.tool);
-          },
-          disabled: !doc,
-        })),
+        items: [
+          ...TOOLS.slice(1).map((t) => ({
+            label: t.label,
+            icon: t.icon,
+            keys: `Ctrl+${t.key}`,
+            run: () => {
+              setMode("drawing");
+              setTool(t.tool);
+            },
+            disabled: !doc,
+          })),
+          "separator",
+          { label: "New page", icon: "plus", run: () => void exec({ kind: "addPage" }), disabled: !doc },
+        ],
+      },
+      {
+        label: "Arrange",
+        items: [...alignItems, "separator", ...positionItems, "separator", ...frontItems, ...backItems, "separator", ...groupItems],
       },
       {
         label: "Help",
         items: [
+          { label: "Command palette", icon: "command", keys: "Ctrl+K", run: () => setPalette({ kind: "commands" }), disabled: !doc },
           { label: "Keyboard shortcuts", icon: "keyboard", run: () => setDialog("shortcuts") },
           { label: "About Flowster", icon: "info", run: () => setDialog("about") },
         ],
       },
     ],
-    [busy, deleteSelection, doc, drawing, editText, exec, inspector, shapesPanel, mode, onNew, onOpen, onSave, selectAll, selection, stepZoom, undo],
+    [busy, deleteSelection, doc, drawing, editText, exec, inspector, shapesPanel, mode, onNew, onOpen, onSave, selectAll, selection, stepZoom, undo,
+      autoFit, rulers, grid, alignItems, positionItems, frontItems, backItems, groupItems,
+      onCut, onCopy, onPaste, duplicate, pasteStyle, selectedFormat, styleClip, hasClip, zoomToSelection, snapGrid, smartGuides, minimap],
   );
+
+  // The command palette lists every enabled menu command, then pages and shapes.
+  const paletteItems = useMemo((): PaletteItem[] => {
+    if (palette?.kind !== "commands") return [];
+    const commands = menus.flatMap((m) =>
+      m.items.flatMap((it): PaletteItem[] =>
+        it === "separator" || it.disabled
+          ? []
+          : [
+              {
+                id: `${m.label}/${it.label}`,
+                label: it.label,
+                group: it.checked === undefined ? m.label : `${m.label} · ${it.checked ? "on" : "off"}`,
+                icon: it.icon,
+                keys: it.keys,
+                run: it.run,
+              },
+            ],
+      ),
+    );
+    const pages = (doc?.pages ?? []).map(
+      (p): PaletteItem => ({ id: `page/${p.id}`, label: `Go to ${p.name}`, group: "Page", icon: "page", run: () => showPage(p.index) }),
+    );
+    const shapes = library.map(
+      (e): PaletteItem => ({
+        id: `shape/${e.id}`,
+        label: `Add ${e.name}`,
+        group: "Shape",
+        shape: e,
+        keywords: e.category,
+        run: () => {
+          setMode("drawing");
+          addFromLibrary(e);
+        },
+      }),
+    );
+    return [...commands, ...pages, ...shapes];
+  }, [palette, menus, doc, library, showPage, addFromLibrary]);
+
+  // Quick add: the shapes only, dropped where the canvas was double-clicked.
+  const quickAddItems = useMemo((): PaletteItem[] => {
+    if (palette?.kind !== "shapes") return [];
+    return library.map((e) => ({
+      id: e.id,
+      label: e.name,
+      group: e.category,
+      shape: e,
+      run: () => addFromLibrary(e, palette.at),
+    }));
+  }, [palette, library, addFromLibrary]);
 
   const title = doc?.info.meta.title || doc?.info.fileName.replace(/\.[^.]+$/, "") || "";
 
@@ -564,6 +915,27 @@ export function App({ engine }: { engine: EngineClient }) {
                   />
                 ))}
               </div>
+              <div className="tb-group" aria-label="Arrange">
+                <DropButton icon="shapeAlignLeft" label="Align" items={alignItems} disabled={!arrange.any} />
+                <DropButton icon="position" label="Position" items={positionItems} disabled={!arrange.any} />
+                <DropButton
+                  icon="front"
+                  label="Bring to front"
+                  keys="Ctrl+Shift+F"
+                  onClick={() => arrange.reorder("front")}
+                  items={frontItems}
+                  disabled={!arrange.any}
+                />
+                <DropButton
+                  icon="back"
+                  label="Send to back"
+                  keys="Ctrl+Shift+B"
+                  onClick={() => arrange.reorder("back")}
+                  items={backItems}
+                  disabled={!arrange.any}
+                />
+                <DropButton icon="group" label="Group" items={groupItems} disabled={!arrange.canAlign && !arrange.canUngroup} />
+              </div>
               {selectedFormat && <FormatBar format={selectedFormat} apply={applyFormat} />}
             </>
           )}
@@ -600,6 +972,14 @@ export function App({ engine }: { engine: EngineClient }) {
                     if (entry) addFromLibrary(entry, at);
                   }}
                   onZoomChange={setZoom}
+                  grid={grid}
+                  rulers={rulers}
+                  autoFit={autoFit}
+                  onManualView={() => setAutoFit(false)}
+                  snap={snap}
+                  minimap={minimap}
+                  onDuplicate={(ids, dx, dy) => void duplicate(ids, dx, dy)}
+                  onQuickAdd={(client, at) => setPalette({ kind: "shapes", client, at })}
                 />
               ) : (
                 <div className="stage-empty">{doc.pages.length === 0 ? "This file has no drawing pages." : "Loading page…"}</div>
@@ -654,24 +1034,84 @@ export function App({ engine }: { engine: EngineClient }) {
       {doc && (
         <footer className="statusbar">
           <div className="page-tabs" role="tablist" aria-label="Pages">
-            {doc.pages.map((p) => (
+            {doc.pages
+              .filter((p) => !p.hidden || p.index === page)
+              .map((p) =>
+                renaming === p.index ? (
+                  <input
+                    key={p.id}
+                    className="page-rename"
+                    aria-label="Page name"
+                    defaultValue={p.name}
+                    autoFocus
+                    onFocus={(e) => e.currentTarget.select()}
+                    onBlur={(e) => {
+                      const name = e.currentTarget.value.trim();
+                      setRenaming(null);
+                      if (name && name !== p.name) void exec({ kind: "renamePage", page: p.index, name });
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                      else if (e.key === "Escape") {
+                        e.currentTarget.value = p.name;
+                        e.currentTarget.blur();
+                      }
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    role="tab"
+                    key={p.id}
+                    aria-selected={p.index === page}
+                    className={[p.background && "background", p.hidden && "hidden"].filter(Boolean).join(" ") || undefined}
+                    onClick={() => showPage(p.index)}
+                    onDoubleClick={() => setRenaming(p.index)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      showPage(p.index);
+                      setPageMenu({ page: p.index, at: [e.clientX, e.clientY] });
+                    }}
+                    title={[p.background && "Background page", p.hidden && "Hidden page"].filter(Boolean).join(" · ") || undefined}
+                  >
+                    <Icon name={p.hidden ? "eyeOff" : "page"} size={14} />
+                    {p.name}
+                  </button>
+                ),
+              )}
+            <button
+              type="button"
+              className="page-add"
+              aria-label="Insert page"
+              title="Insert page"
+              onClick={() => void exec({ kind: "addPage" })}
+            >
+              <Icon name="plus" size={15} />
+            </button>
+            {doc.pages.some((p) => p.hidden) && (
               <button
                 type="button"
-                role="tab"
-                key={p.id}
-                aria-selected={p.index === page}
-                className={p.background ? "background" : undefined}
-                onClick={() => {
-                  setPage(p.index);
-                  setMode("drawing");
+                className="page-hidden"
+                aria-label="Hidden pages"
+                title="Hidden pages"
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setPageMenu({ page: null, at: [r.left, r.top - 4] });
                 }}
-                title={p.background ? "Background page" : undefined}
               >
-                <Icon name="page" size={14} />
-                {p.name}
+                <Icon name="eyeOff" size={14} />
+                {doc.pages.filter((p) => p.hidden).length}
               </button>
-            ))}
+            )}
           </div>
+          {pageMenu && (
+            <PopupMenu
+              items={pageMenuItems(pageMenu.page)}
+              at={pageMenu.at}
+              label={pageMenu.page === null ? "Hidden pages" : "Page"}
+              onClose={closePageMenu}
+            />
+          )}
           <div className="status-items">
             {selection.length > 0 && <span>{selection.length === 1 ? "1 shape selected" : `${selection.length} shapes selected`}</span>}
             {dl && (
@@ -711,12 +1151,33 @@ export function App({ engine }: { engine: EngineClient }) {
                 <button type="button" className="icon-btn" aria-label="Fit page" onClick={() => canvas.current?.fit()}>
                   <Icon name="fit" size={15} />
                 </button>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label="Fit page on resize"
+                  aria-pressed={autoFit}
+                  title={autoFit ? "Fitting the page on resize (zoom or pan to stop)" : "Fit the page whenever the window resizes"}
+                  onClick={() => setAutoFit((v) => !v)}
+                >
+                  <Icon name="autoFit" size={15} />
+                </button>
               </div>
             )}
           </div>
         </footer>
       )}
 
+      {palette?.kind === "commands" && (
+        <CommandPalette
+          items={paletteItems}
+          placeholder="Type a command, a page or a shape…"
+          label="Command palette"
+          onClose={closePalette}
+        />
+      )}
+      {palette?.kind === "shapes" && (
+        <CommandPalette items={quickAddItems} placeholder="Add a shape…" label="Add a shape" at={palette.client} onClose={closePalette} />
+      )}
       {dialog === "shortcuts" && <ShortcutsDialog onClose={() => setDialog(null)} />}
       {dialog === "about" && <AboutDialog onClose={() => setDialog(null)} />}
     </div>

@@ -9,7 +9,8 @@ import { Icon } from "./icons";
 /** The drag payload type for shapes dropped on the canvas. */
 export const SHAPE_MIME = "application/x-flowster-shape";
 
-function Preview({ e }: { e: LibraryEntry }) {
+/** A library shape's outline, drawn to fit its box. */
+export function ShapePreview({ e }: { e: LibraryEntry }) {
   if (e.id === "text") {
     return (
       <svg viewBox="0 0 40 24" className="shape-preview" aria-hidden="true">
@@ -92,7 +93,7 @@ export function ShapesPanel({ library, onAdd }: { library: LibraryEntry[]; onAdd
                       }}
                       onClick={() => onAdd(e)}
                     >
-                      <Preview e={e} />
+                      <ShapePreview e={e} />
                       <span>{e.name}</span>
                     </button>
                   ))}
