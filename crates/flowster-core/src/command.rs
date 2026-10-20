@@ -100,6 +100,88 @@ pub enum Command {
         shape: u32,
         text: String,
     },
+    /// Aligns shapes to the first one (the primary selection): `left`,
+    /// `center`, `right`, `top`, `middle` or `bottom`.
+    #[serde(rename_all = "camelCase")]
+    AlignShapes {
+        page: usize,
+        shapes: Vec<u32>,
+        align: String,
+    },
+    /// Spaces three or more shapes evenly along `horizontal` or `vertical`;
+    /// the outermost two stay put.
+    #[serde(rename_all = "camelCase")]
+    DistributeShapes {
+        page: usize,
+        shapes: Vec<u32>,
+        axis: String,
+    },
+    /// Turns shapes a quarter turn about the selection's centre:
+    /// `left` (counter-clockwise) or `right`.
+    #[serde(rename_all = "camelCase")]
+    RotateShapes {
+        page: usize,
+        shapes: Vec<u32>,
+        direction: String,
+    },
+    /// Mirrors shapes about the selection's centre: `horizontal` or `vertical`.
+    #[serde(rename_all = "camelCase")]
+    FlipShapes {
+        page: usize,
+        shapes: Vec<u32>,
+        axis: String,
+    },
+    /// Changes the stacking order: `front`, `back`, `forward` or `backward`.
+    #[serde(rename_all = "camelCase")]
+    ReorderShapes {
+        page: usize,
+        shapes: Vec<u32>,
+        to: String,
+    },
+    /// Puts top-level shapes into a new group.
+    #[serde(rename_all = "camelCase")]
+    GroupShapes {
+        page: usize,
+        shapes: Vec<u32>,
+    },
+    /// Breaks groups apart; their members return to the page.
+    #[serde(rename_all = "camelCase")]
+    UngroupShapes {
+        page: usize,
+        shapes: Vec<u32>,
+    },
+    /// Inserts a blank foreground page after `after` (after the last
+    /// foreground page when absent), with the page setup of the page it follows.
+    #[serde(rename_all = "camelCase")]
+    AddPage {
+        #[serde(default)]
+        after: Option<usize>,
+    },
+    #[serde(rename_all = "camelCase")]
+    DeletePage {
+        page: usize,
+    },
+    #[serde(rename_all = "camelCase")]
+    RenamePage {
+        page: usize,
+        name: String,
+    },
+    /// Hides a page from the page tabs, or shows it again (`UIVisibility`).
+    #[serde(rename_all = "camelCase")]
+    SetPageHidden {
+        page: usize,
+        hidden: bool,
+    },
+    /// Pastes shapes (from the `copyShapes` query) onto a page, moved by
+    /// `(dx, dy)` inches. They get new ids; glue between pasted shapes is kept,
+    /// glue to anything else comes undone.
+    #[serde(rename_all = "camelCase")]
+    InsertShapes {
+        page: usize,
+        shapes: Vec<crate::model::Shape>,
+        dx: f64,
+        dy: f64,
+    },
     /// Per-user undo of this peer's last command.
     Undo,
     Redo,
@@ -131,9 +213,29 @@ impl Command {
             Command::SetBounds { .. } | Command::SetEndpoints { .. } => "Resize",
             Command::DeleteShapes { .. } => "Delete",
             Command::SetText { .. } => "Edit Text",
+            // The rotate handle sets only the angle.
+            Command::SetCells { cells, .. } if cells.iter().all(|c| c.cell == "Angle") => "Rotate",
             Command::SetCells { .. } => "Format",
             Command::AddConnector { .. } => "Connect Shapes",
+            Command::InsertShapes { .. } => "Paste",
             Command::AutoConnect { .. } => "AutoConnect",
+            Command::AlignShapes { .. } => "Align Shapes",
+            Command::DistributeShapes { .. } => "Distribute Shapes",
+            Command::RotateShapes { .. } => "Rotate",
+            Command::FlipShapes { .. } => "Flip",
+            Command::ReorderShapes { to, .. } => match to.as_str() {
+                "front" => "Bring to Front",
+                "back" => "Send to Back",
+                "forward" => "Bring Forward",
+                _ => "Send Backward",
+            },
+            Command::GroupShapes { .. } => "Group",
+            Command::UngroupShapes { .. } => "Ungroup",
+            Command::AddPage { .. } => "Insert Page",
+            Command::DeletePage { .. } => "Delete Page",
+            Command::RenamePage { .. } => "Rename Page",
+            Command::SetPageHidden { hidden: true, .. } => "Hide Page",
+            Command::SetPageHidden { .. } => "Unhide Page",
             Command::Undo => "Undo",
             Command::Redo => "Redo",
         }
@@ -153,6 +255,9 @@ pub struct ChangeSummary {
     /// The shape a command created (`page`, legacy id), for selecting it.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub created: Option<(usize, u32)>,
+    /// The page list changed; the page to show next.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub page: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

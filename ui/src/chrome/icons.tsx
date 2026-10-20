@@ -44,7 +44,43 @@ export type IconName =
   | "valignMiddle"
   | "valignBottom"
   | "search"
-  | "noColor";
+  | "noColor"
+  | "plus"
+  | "grid"
+  | "ruler"
+  | "autoFit"
+  | "rename"
+  | "eye"
+  | "eyeOff"
+  | "shapeAlignLeft"
+  | "shapeAlignCenter"
+  | "shapeAlignRight"
+  | "shapeAlignTop"
+  | "shapeAlignMiddle"
+  | "shapeAlignBottom"
+  | "distributeH"
+  | "distributeV"
+  | "rotateLeft"
+  | "rotateRight"
+  | "flipH"
+  | "flipV"
+  | "position"
+  | "front"
+  | "back"
+  | "forward"
+  | "backward"
+  | "group"
+  | "ungroup"
+  | "copy"
+  | "cut"
+  | "paste"
+  | "duplicate"
+  | "brush"
+  | "command"
+  | "magnet"
+  | "guides"
+  | "map"
+  | "focus";
 
 const paths: Record<IconName, ReactNode> = {
   logo: (
@@ -215,6 +251,232 @@ const paths: Record<IconName, ReactNode> = {
     <>
       <path d="M6 3h8l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
       <path d="M14 3v4h4" />
+    </>
+  ),
+  plus: <path d="M12 5v14M5 12h14" />,
+  grid: (
+    <>
+      <rect x="4" y="4" width="16" height="16" rx="1.5" />
+      <path d="M9.33 4v16M14.67 4v16M4 9.33h16M4 14.67h16" />
+    </>
+  ),
+  ruler: (
+    <>
+      <path d="M3 8.5 8.5 3 21 15.5 15.5 21z" />
+      <path d="m7 7 2 2M10 4.5l1.5 1.5M10 10l2 2M13 7.5l1.5 1.5M13 13l2 2M16 10.5l1.5 1.5" />
+    </>
+  ),
+  autoFit: (
+    <>
+      <path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />
+      <path d="M9.5 12h5M8 12l1.5-1.5M8 12l1.5 1.5M16 12l-1.5-1.5M16 12l-1.5 1.5" />
+    </>
+  ),
+  rename: (
+    <>
+      <path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" />
+      <path d="m14.5 7.5 3 3" />
+    </>
+  ),
+  eye: (
+    <>
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  eyeOff: (
+    <>
+      <path d="M9.9 5.8A9.6 9.6 0 0 1 12 5.5C18 5.5 21.5 12 21.5 12a17 17 0 0 1-2.7 3.4M6.6 6.9C4 8.6 2.5 12 2.5 12S6 18.5 12 18.5a9.3 9.3 0 0 0 4.9-1.4" />
+      <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2M3 3l18 18" />
+    </>
+  ),
+  shapeAlignLeft: (
+    <>
+      <path d="M4 3v18" />
+      <rect x="7" y="5.5" width="13" height="5" rx="1" />
+      <rect x="7" y="13.5" width="8" height="5" rx="1" />
+    </>
+  ),
+  shapeAlignCenter: (
+    <>
+      <path d="M12 3v18" />
+      <rect x="4.5" y="5.5" width="15" height="5" rx="1" />
+      <rect x="7.5" y="13.5" width="9" height="5" rx="1" />
+    </>
+  ),
+  shapeAlignRight: (
+    <>
+      <path d="M20 3v18" />
+      <rect x="4" y="5.5" width="13" height="5" rx="1" />
+      <rect x="9" y="13.5" width="8" height="5" rx="1" />
+    </>
+  ),
+  shapeAlignTop: (
+    <>
+      <path d="M3 4h18" />
+      <rect x="5.5" y="7" width="5" height="13" rx="1" />
+      <rect x="13.5" y="7" width="5" height="8" rx="1" />
+    </>
+  ),
+  shapeAlignMiddle: (
+    <>
+      <path d="M3 12h18" />
+      <rect x="5.5" y="4.5" width="5" height="15" rx="1" />
+      <rect x="13.5" y="7.5" width="5" height="9" rx="1" />
+    </>
+  ),
+  shapeAlignBottom: (
+    <>
+      <path d="M3 20h18" />
+      <rect x="5.5" y="4" width="5" height="13" rx="1" />
+      <rect x="13.5" y="9" width="5" height="8" rx="1" />
+    </>
+  ),
+  distributeH: (
+    <>
+      <path d="M3 4v16M21 4v16" />
+      <rect x="6" y="8" width="4" height="8" rx="1" />
+      <rect x="14" y="8" width="4" height="8" rx="1" />
+    </>
+  ),
+  distributeV: (
+    <>
+      <path d="M4 3h16M4 21h16" />
+      <rect x="8" y="6" width="8" height="4" rx="1" />
+      <rect x="8" y="14" width="8" height="4" rx="1" />
+    </>
+  ),
+  rotateLeft: (
+    <>
+      <path d="M4 4v5h5" />
+      <path d="M4.6 9A8 8 0 1 1 6 16.9" />
+    </>
+  ),
+  rotateRight: (
+    <>
+      <path d="M20 4v5h-5" />
+      <path d="M19.4 9A8 8 0 1 0 18 16.9" />
+    </>
+  ),
+  flipH: (
+    <>
+      <path d="M12 3v18" strokeDasharray="2 2.5" />
+      <path d="M9 6 3 18h6zM15 6l6 12h-6z" />
+    </>
+  ),
+  flipV: (
+    <>
+      <path d="M3 12h18" strokeDasharray="2 2.5" />
+      <path d="M6 9 18 3v6zM6 15l12 6v-6z" />
+    </>
+  ),
+  position: (
+    <>
+      <rect x="3.5" y="13.5" width="7" height="7" rx="1" />
+      <rect x="13.5" y="3.5" width="7" height="7" rx="1" />
+      <path d="M7 3v6M4 6h6M17 14v6M14 17h6" />
+    </>
+  ),
+  front: (
+    <>
+      <rect x="3.5" y="3.5" width="10" height="10" rx="1.5" strokeDasharray="2 2" />
+      <rect x="10.5" y="10.5" width="10" height="10" rx="1.5" fill="currentColor" fillOpacity="0.25" />
+    </>
+  ),
+  back: (
+    <>
+      <rect x="10.5" y="10.5" width="10" height="10" rx="1.5" fill="currentColor" fillOpacity="0.25" />
+      <rect x="3.5" y="3.5" width="10" height="10" rx="1.5" strokeDasharray="2 2" />
+    </>
+  ),
+  forward: (
+    <>
+      <rect x="3.5" y="9.5" width="9" height="9" rx="1.5" strokeDasharray="2 2" />
+      <rect x="9.5" y="5.5" width="9" height="9" rx="1.5" fill="currentColor" fillOpacity="0.25" />
+      <path d="M20 21v-4M18 19l2-2 2 2" />
+    </>
+  ),
+  backward: (
+    <>
+      <rect x="9.5" y="5.5" width="9" height="9" rx="1.5" fill="currentColor" fillOpacity="0.25" />
+      <rect x="3.5" y="9.5" width="9" height="9" rx="1.5" strokeDasharray="2 2" />
+      <path d="M20 17v4M18 19l2 2 2-2" />
+    </>
+  ),
+  group: (
+    <>
+      <path d="M3 6V3h3M18 3h3v3M21 18v3h-3M6 21H3v-3" />
+      <rect x="6.5" y="6.5" width="6" height="6" rx="1" />
+      <rect x="11.5" y="11.5" width="6" height="6" rx="1" />
+    </>
+  ),
+  ungroup: (
+    <>
+      <rect x="3.5" y="3.5" width="7" height="7" rx="1" />
+      <rect x="13.5" y="13.5" width="7" height="7" rx="1" />
+      <path d="M14 4h6v6M4 14v6h6" strokeDasharray="2 2" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect x="8.5" y="8.5" width="12" height="12" rx="2" />
+      <path d="M15.5 8.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h3.5" />
+    </>
+  ),
+  cut: (
+    <>
+      <circle cx="6.5" cy="17.5" r="3" />
+      <circle cx="17.5" cy="17.5" r="3" />
+      <path d="M8.6 15.4 18 4M15.4 15.4 6 4" />
+    </>
+  ),
+  paste: (
+    <>
+      <path d="M9 4.5H6.5A1.5 1.5 0 0 0 5 6v13.5A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H15" />
+      <rect x="9" y="3" width="6" height="3.5" rx="1" />
+    </>
+  ),
+  duplicate: (
+    <>
+      <rect x="8.5" y="8.5" width="12" height="12" rx="2" />
+      <path d="M15.5 8.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h3.5M14.5 11.5v6M11.5 14.5h6" />
+    </>
+  ),
+  brush: (
+    <>
+      <path d="M18.5 3.5 10 12l2 2 8.5-8.5a1.4 1.4 0 0 0-2-2z" />
+      <path d="M10 12c-2.5 0-4 1.5-4 4 0 1.5-.8 2.5-2.5 3 4.5 1.5 10.5.5 10.5-5z" />
+    </>
+  ),
+  command: (
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="2.5" />
+      <path d="m7 10 3 2-3 2M12.5 14.5H17" />
+    </>
+  ),
+  magnet: (
+    <>
+      <path d="M5 4h4v8a3 3 0 0 0 6 0V4h4v8a7 7 0 0 1-14 0z" />
+      <path d="M5 8h4M15 8h4" />
+    </>
+  ),
+  guides: (
+    <>
+      <path d="M12 2.5v19M2.5 12h19" strokeDasharray="2 2.5" />
+      <rect x="5" y="5" width="7" height="7" rx="1" />
+      <rect x="12" y="12" width="7" height="7" rx="1" />
+    </>
+  ),
+  map: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <rect x="12" y="12" width="7" height="6" rx="1" />
+    </>
+  ),
+  focus: (
+    <>
+      <path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />
+      <rect x="9" y="9" width="6" height="6" rx="1" />
     </>
   ),
 };

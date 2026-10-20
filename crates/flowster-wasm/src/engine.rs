@@ -235,6 +235,15 @@ impl Engine {
                         serde_json::to_value(flowster_core::determinism::default_report()).unwrap_or(Value::Null)
                     }
                     Query::Library => library_json(),
+                    Query::CopyShapes { page, shapes } => {
+                        let list: Vec<_> = d
+                            .model
+                            .as_ref()
+                            .and_then(|m| m.pages.get(page))
+                            .map(|p| p.shapes.iter().filter(|s| shapes.contains(&s.id)).collect())
+                            .unwrap_or_default();
+                        serde_json::to_value(list).unwrap_or(Value::Null)
+                    }
                     Query::Pages => match &d.model {
                         Some(m) => serde_json::to_value(flowster_render::pages(m)).unwrap_or(Value::Null),
                         None => json!([]),

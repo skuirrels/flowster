@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 /// One ShapeSheet cell.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Cell {
     /// Cached value in internal units (inches, radians, …), as written by the producer.
     pub v: Option<String>,
@@ -20,7 +20,7 @@ impl Cell {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Row {
     /// Row type for geometry rows (`MoveTo`, `LineTo`, `NURBSTo`, …).
     pub t: Option<String>,
@@ -31,7 +31,7 @@ pub struct Row {
     pub cells: BTreeMap<String, Cell>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Section {
     pub n: String,
     /// Index for multi-instance sections (`Geometry` 0, 1, …).
@@ -42,7 +42,7 @@ pub struct Section {
     pub rows: Vec<Row>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Sheet {
     pub cells: BTreeMap<String, Cell>,
     pub sections: Vec<Section>,
@@ -61,7 +61,7 @@ impl Sheet {
 }
 
 /// Shape text with its run markers (`<cp/>`, `<pp/>`, `<tp/>`, `<fld/>`).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TextPiece {
     Text(String),
     /// Following characters use Character row `IX`.
@@ -73,7 +73,7 @@ pub enum TextPiece {
     Fld(u32),
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ShapeType {
     #[default]
     Shape,
@@ -83,7 +83,7 @@ pub enum ShapeType {
 }
 
 /// Embedded image or object of a `Foreign` shape.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ForeignData {
     pub foreign_type: String,
     pub compression: Option<String>,
@@ -91,7 +91,7 @@ pub struct ForeignData {
     pub part: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Shape {
     pub id: u32,
     pub kind: ShapeType,
@@ -162,6 +162,13 @@ pub struct Page {
     pub sheet: Sheet,
     pub shapes: Vec<Shape>,
     pub connects: Vec<Connect>,
+}
+
+impl Page {
+    /// Hidden from the page tabs (PageSheet `UIVisibility` = 1).
+    pub fn hidden(&self) -> bool {
+        self.sheet.cell("UIVisibility").and_then(|c| c.v.as_deref()).and_then(|v| v.parse::<f64>().ok()) == Some(1.0)
+    }
 }
 
 /// Default style ids from `DocumentSettings`.

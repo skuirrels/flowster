@@ -36,6 +36,8 @@ pub struct PageInfo {
     pub name: String,
     pub background: bool,
     pub back_page: Option<u32>,
+    /// Hidden from the page tabs.
+    pub hidden: bool,
     /// Paper size in inches.
     pub width: f64,
     pub height: f64,
@@ -76,6 +78,12 @@ pub struct ShapeBox {
     /// A dynamic connector (`ObjType` 2).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub connector: bool,
+    /// A group (it can be ungrouped).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub group: bool,
+    /// The `Angle` cell, radians counter-clockwise.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub angle: f64,
     /// How the shape looks now (resolved through styles, masters and theme).
     pub format: ShapeFormat,
 }
@@ -244,6 +252,7 @@ pub fn page_info(doc: &Document, index: usize) -> Option<PageInfo> {
         name: p.name.clone().or_else(|| p.name_u.clone()).unwrap_or_else(|| format!("Page-{}", index + 1)),
         background: p.background,
         back_page: p.back_page,
+        hidden: p.hidden(),
         width: num("PageWidth").unwrap_or(8.5),
         height: num("PageHeight").unwrap_or(11.0),
     })
@@ -457,6 +466,8 @@ impl<'d> Builder<'d> {
                 begin_glue: flowster_core::library::glue_target(&shape.sheet, "BegTrigger"),
                 end_glue: flowster_core::library::glue_target(&shape.sheet, "EndTrigger"),
                 connector: r.num("ObjType") == Some(2.0),
+                group: shape.kind == ShapeType::Group,
+                angle: r.num("Angle").unwrap_or(0.0),
                 format,
             };
             if let Some(boxes) = &mut self.boxes {

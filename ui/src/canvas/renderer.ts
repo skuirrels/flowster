@@ -3,6 +3,7 @@
 
 import type { Affine, DisplayList, Item, Paragraph, Run, Seg } from "../engine/protocol";
 import { css, fillPaint, mul } from "./paint";
+import { drawGrid } from "./rulers";
 
 export interface View {
   /** CSS pixels per inch. */
@@ -45,10 +46,12 @@ function image(mime: string, data: string, onLoad: () => void): HTMLImageElement
   return img.complete && img.naturalWidth > 0 ? img : null;
 }
 
-export function fitView(page: { width: number; height: number }, cssW: number, cssH: number): View {
+/** The view that fits the page in the canvas, less `inset` CSS pixels along the top and left (the rulers). */
+export function fitView(page: { width: number; height: number }, cssW: number, cssH: number, inset = 0): View {
   const pad = 32;
-  const zoom = Math.max(0.01, Math.min((cssW - 2 * pad) / page.width, (cssH - 2 * pad) / page.height));
-  return { zoom, ox: (cssW - page.width * zoom) / 2, oy: (cssH - page.height * zoom) / 2 };
+  const [w, h] = [cssW - inset, cssH - inset];
+  const zoom = Math.max(0.01, Math.min((w - 2 * pad) / page.width, (h - 2 * pad) / page.height));
+  return { zoom, ox: inset + (w - page.width * zoom) / 2, oy: inset + (h - page.height * zoom) / 2 };
 }
 
 export interface Theme {
@@ -56,7 +59,7 @@ export interface Theme {
   pageShadow: string;
 }
 
-/** Draws the page and its display list. `dpr` is the canvas backing-store scale. */
+/** Draws the page, its grid when asked, and its display list. `dpr` is the canvas backing-store scale. */
 export function render(
   ctx: CanvasRenderingContext2D,
   dl: DisplayList,
@@ -64,6 +67,7 @@ export function render(
   dpr: number,
   theme: Theme,
   onAsyncLoad: () => void,
+  grid = false,
 ): void {
   const { width: W, height: H } = dl.page;
   const cw = ctx.canvas.width;
@@ -81,6 +85,7 @@ export function render(
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(view.ox, view.oy, W * view.zoom, H * view.zoom);
   ctx.restore();
+  if (grid) drawGrid(ctx, view, dl.page, cw / dpr, ch / dpr);
 
   // Page inches (+Y up) → device pixels.
   const z = view.zoom;

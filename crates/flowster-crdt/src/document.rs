@@ -176,7 +176,19 @@ impl CommandTarget for Document {
             | Command::SetText { .. }
             | Command::SetCells { .. }
             | Command::AddConnector { .. }
-            | Command::AutoConnect { .. } => {
+            | Command::AutoConnect { .. }
+            | Command::AlignShapes { .. }
+            | Command::DistributeShapes { .. }
+            | Command::RotateShapes { .. }
+            | Command::FlipShapes { .. }
+            | Command::ReorderShapes { .. }
+            | Command::GroupShapes { .. }
+            | Command::UngroupShapes { .. }
+            | Command::AddPage { .. }
+            | Command::DeletePage { .. }
+            | Command::RenamePage { .. }
+            | Command::SetPageHidden { .. }
+            | Command::InsertShapes { .. } => {
                 let mut ed = crate::edit::Editor { doc: &self.doc, next: &mut self.next_uuid };
                 changes = match cmd {
                     Command::AddShape { page, shape, x, y, w, h } => ed.add_shape(*page, shape, *x, *y, *w, *h),
@@ -193,6 +205,18 @@ impl CommandTarget for Document {
                     Command::DeleteShapes { page, shapes } => ed.delete_shapes(*page, shapes),
                     Command::SetText { page, shape, text } => ed.set_text(*page, *shape, text),
                     Command::SetCells { page, shapes, cells } => ed.set_cells(*page, shapes, cells),
+                    Command::AlignShapes { page, shapes, align } => ed.align(*page, shapes, align),
+                    Command::DistributeShapes { page, shapes, axis } => ed.distribute(*page, shapes, axis),
+                    Command::RotateShapes { page, shapes, direction } => ed.rotate(*page, shapes, direction),
+                    Command::FlipShapes { page, shapes, axis } => ed.flip(*page, shapes, axis),
+                    Command::ReorderShapes { page, shapes, to } => ed.reorder(*page, shapes, to),
+                    Command::GroupShapes { page, shapes } => ed.group(*page, shapes),
+                    Command::UngroupShapes { page, shapes } => ed.ungroup(*page, shapes),
+                    Command::AddPage { after } => ed.add_page(*after),
+                    Command::DeletePage { page } => ed.delete_page(*page),
+                    Command::RenamePage { page, name } => ed.rename_page(*page, name),
+                    Command::SetPageHidden { page, hidden } => ed.set_page_hidden(*page, *hidden),
+                    Command::InsertShapes { page, shapes, dx, dy } => ed.insert_shapes(*page, shapes, *dx, *dy),
                     _ => unreachable!(),
                 }?;
                 self.doc.commit();
@@ -383,6 +407,153 @@ mod tests {
         assert_eq!(order.len(), 5, "a frame and three lanes, then the step");
         assert_eq!(order[0], pool);
         assert_eq!(*order.last().unwrap(), step);
+    }
+
+    #[test]
+    fn pages_insert_rename_hide_delete_and_undo() {
+        let mut d = Document::new_drawing("Pages");
+        let names = |d: &Document| -> Vec<String> {
+            d.read_model(|_| None).pages.iter().map(|p| p.name.clone().unwrap_or_default()).collect()
+        };
+        let added = d.exec(&Command::AddPage { after: None }).unwrap();
+        assert_eq!(added.page, Some(1));
+        d.exec(&Command::AddPage { after: Some(0) }).unwrap();
+        assert_eq!(names(&d), ["Page-1", "Page-3", "Page-2"]);
+        let m = d.read_model(|_| None);
+        assert_eq!(m.pages[1].sheet.cells["PageWidth"].v.as_deref(), Some("11"), "page setup is copied");
+        assert_ne!(m.pages[1].id, m.pages[2].id);
+
+        d.exec(&Command::AddShape { page: 1, shape: "rectangle".into(), x: 1.0, y: 1.0, w: 1.0, h: 1.0 }).unwrap();
+        assert_eq!(d.read_model(|_| None).pages[1].shapes.len(), 1);
+        assert!(d.read_model(|_| None).pages[0].shapes.is_empty());
+
+        d.exec(&Command::RenamePage { page: 1, name: " Overview ".into() }).unwrap();
+        assert!(d.exec(&Command::RenamePage { page: 2, name: "Overview".into() }).is_err());
+        assert_eq!(names(&d)[1], "Overview");
+
+        let hidden = d.exec(&Command::SetPageHidden { page: 0, hidden: true }).unwrap();
+        assert_eq!(hidden.page, Some(1), "the next visible page shows");
+        assert!(d.read_model(|_| None).pages[0].hidden());
+        d.exec(&Command::SetPageHidden { page: 1, hidden: true }).unwrap();
+        assert!(d.exec(&Command::SetPageHidden { page: 2, hidden: true }).is_err(), "one page stays visible");
+        d.exec(&Command::SetPageHidden { page: 0, hidden: false }).unwrap();
+        assert!(!d.read_model(|_| None).pages[0].hidden());
+
+        let deleted = d.exec(&Command::DeletePage { page: 1 }).unwrap();
+        assert_eq!(names(&d), ["Page-1", "Page-2"]);
+        assert_eq!(deleted.page, Some(1));
+        d.exec(&Command::DeletePage { page: 0 }).unwrap();
+        assert!(d.exec(&Command::DeletePage { page: 0 }).is_err(), "the last page stays");
+        d.exec(&Command::Undo).unwrap();
+        d.exec(&Command::Undo).unwrap();
+        assert_eq!(names(&d), ["Page-1", "Overview", "Page-2"]);
+        assert_eq!(d.read_model(|_| None).pages[1].shapes.len(), 1, "undo brings the shapes back");
+    }
+
+    #[test]
+    fn align_distribute_orient_reorder_and_group() {
+        let mut d = Document::new_drawing("Arrange");
+        let add = |d: &mut Document, x: f64, y: f64, w: f64| {
+            let cmd = Command::AddShape { page: 0, shape: "rectangle".into(), x, y, w, h: 1.0 };
+            d.exec(&cmd).unwrap().created.unwrap().1
+        };
+        let a = add(&mut d, 1.0, 1.0, 2.0);
+        let b = add(&mut d, 4.0, 3.0, 1.0);
+        let c = add(&mut d, 8.0, 2.0, 1.0);
+        let cell = |d: &Document, id: u32, name: &str| -> f64 {
+            let m = d.read_model(|_| None);
+            let calc = flowster_core::calc::Calc::for_page(&m, &m.pages[0]);
+            calc.cell(id, name).num().unwrap()
+        };
+        let close = |x: f64, y: f64| (x - y).abs() < 1e-9;
+
+        d.exec(&Command::AlignShapes { page: 0, shapes: vec![a, b, c], align: "left".into() }).unwrap();
+        assert!(close(cell(&d, b, "PinX"), 1.5) && close(cell(&d, c, "PinX"), 1.5), "left edges at x = 1");
+        d.exec(&Command::AlignShapes { page: 0, shapes: vec![a, b, c], align: "middle".into() }).unwrap();
+        assert!(close(cell(&d, b, "PinY"), 1.5));
+        d.exec(&Command::Undo).unwrap();
+        d.exec(&Command::Undo).unwrap();
+
+        // Gaps a→b: 1, b→c: 3; distributed: 2 each.
+        d.exec(&Command::DistributeShapes { page: 0, shapes: vec![c, a, b], axis: "horizontal".into() }).unwrap();
+        assert!(close(cell(&d, a, "PinX"), 2.0) && close(cell(&d, c, "PinX"), 8.5));
+        assert!(close(cell(&d, b, "PinX"), 5.5));
+
+        d.exec(&Command::RotateShapes { page: 0, shapes: vec![a], direction: "left".into() }).unwrap();
+        assert!(close(cell(&d, a, "Angle"), std::f64::consts::FRAC_PI_2));
+        d.exec(&Command::FlipShapes { page: 0, shapes: vec![a], axis: "horizontal".into() }).unwrap();
+        assert!(close(cell(&d, a, "Angle"), -std::f64::consts::FRAC_PI_2));
+        assert!(close(cell(&d, a, "FlipX"), 1.0));
+        assert!(close(cell(&d, a, "PinX"), 2.0), "a lone shape flips in place");
+
+        let order =
+            |d: &Document| -> Vec<u32> { d.read_model(|_| None).pages[0].shapes.iter().map(|s| s.id).collect() };
+        d.exec(&Command::ReorderShapes { page: 0, shapes: vec![a], to: "front".into() }).unwrap();
+        assert_eq!(order(&d), [b, c, a]);
+        d.exec(&Command::ReorderShapes { page: 0, shapes: vec![a], to: "backward".into() }).unwrap();
+        assert_eq!(order(&d), [b, a, c]);
+        d.exec(&Command::ReorderShapes { page: 0, shapes: vec![c], to: "back".into() }).unwrap();
+        assert_eq!(order(&d), [c, b, a]);
+        d.exec(&Command::ReorderShapes { page: 0, shapes: vec![c], to: "forward".into() }).unwrap();
+        assert_eq!(order(&d), [b, c, a]);
+
+        let page_bounds = |d: &Document| {
+            let dl = flowster_render::build_page(&d.read_model(|_| None), 0).unwrap();
+            dl.items.len()
+        };
+        let items = page_bounds(&d);
+        let before = (cell(&d, b, "PinX"), cell(&d, b, "PinY"));
+        let grouped = d.exec(&Command::GroupShapes { page: 0, shapes: vec![b, c] }).unwrap();
+        let g = grouped.created.unwrap().1;
+        let m = d.read_model(|_| None);
+        assert_eq!(m.pages[0].shapes.iter().map(|s| s.id).collect::<Vec<_>>(), [g, a], "the group stacks where c was");
+        assert_eq!(m.pages[0].shapes[0].shapes.len(), 2);
+        assert_eq!(page_bounds(&d), items, "grouping draws the same shapes");
+
+        d.exec(&Command::MoveShapes { page: 0, shapes: vec![g], dx: 1.0, dy: 0.0 }).unwrap();
+        d.exec(&Command::UngroupShapes { page: 0, shapes: vec![g] }).unwrap();
+        assert_eq!(order(&d), [b, c, a]);
+        assert!(close(cell(&d, b, "PinX"), before.0 + 1.0) && close(cell(&d, b, "PinY"), before.1));
+    }
+
+    #[test]
+    fn pasted_shapes_get_new_ids_and_keep_their_glue() {
+        let mut d = Document::new_drawing("Paste");
+        let add = |d: &mut Document, x: f64| {
+            let cmd = Command::AddShape { page: 0, shape: "process".into(), x, y: 1.0, w: 1.0, h: 1.0 };
+            d.exec(&cmd).unwrap().created.unwrap().1
+        };
+        let (a, b) = (add(&mut d, 1.0), add(&mut d, 4.0));
+        let c = d
+            .exec(&Command::AddConnector { page: 0, from: Some(a), to: Some(b), x0: 1.5, y0: 1.5, x1: 4.5, y1: 1.5 })
+            .unwrap()
+            .created
+            .unwrap()
+            .1;
+        let m = d.read_model(|_| None);
+        // Copy b and the connector only: the connector's glue to a must go.
+        let copied: Vec<_> = m.pages[0].shapes.iter().filter(|s| s.id == b || s.id == c).cloned().collect();
+        let pasted = d.exec(&Command::InsertShapes { page: 0, shapes: copied.clone(), dx: 0.0, dy: 3.0 }).unwrap();
+        let new: Vec<u32> = pasted.shapes.iter().map(|s| s.parse().unwrap()).collect();
+        assert_eq!(new, [4, 5]);
+        let m = d.read_model(|_| None);
+        let calc = flowster_core::calc::Calc::for_page(&m, &m.pages[0]);
+        assert!((calc.cell(4, "PinY").num().unwrap() - 4.5).abs() < 1e-9);
+        let conn = m.pages[0].shapes.iter().find(|s| s.id == 5).unwrap();
+        assert_eq!(flowster_core::library::glue_target(&conn.sheet, "BegTrigger"), None);
+        assert_eq!(flowster_core::library::glue_target(&conn.sheet, "EndTrigger"), Some(4));
+        assert_eq!(conn.name_u.as_deref(), Some("Dynamic connector.5"));
+
+        // Copy all three to another page: everything stays connected.
+        d.exec(&Command::AddPage { after: None }).unwrap();
+        let all: Vec<_> = m.pages[0].shapes.iter().filter(|s| [a, b, c].contains(&s.id)).cloned().collect();
+        d.exec(&Command::InsertShapes { page: 1, shapes: all, dx: 0.0, dy: 0.0 }).unwrap();
+        let m = d.read_model(|_| None);
+        let conn = m.pages[1].shapes.iter().find(|s| s.id == 3).unwrap();
+        assert_eq!(flowster_core::library::glue_target(&conn.sheet, "BegTrigger"), Some(1));
+        assert_eq!(flowster_core::library::glue_target(&conn.sheet, "EndTrigger"), Some(2));
+        d.exec(&Command::Undo).unwrap();
+        assert!(d.read_model(|_| None).pages[1].shapes.is_empty());
     }
 
     #[test]

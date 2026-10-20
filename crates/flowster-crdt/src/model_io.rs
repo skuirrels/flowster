@@ -164,7 +164,7 @@ pub(crate) fn lazy_map(m: &LoroMap, key: &str) -> LoroMap {
     child_map(m, key).unwrap_or_else(|| m.insert_container(key, LoroMap::new()).unwrap())
 }
 
-fn write_sheet(m: &LoroMap, sheet: &Sheet) {
+pub(crate) fn write_sheet(m: &LoroMap, sheet: &Sheet) {
     let mut groups: BTreeMap<&str, HashMap<String, LoroValue>> = BTreeMap::new();
     for (name, c) in &sheet.cells {
         match group_of(name) {
@@ -333,6 +333,15 @@ pub(crate) fn write_new_shape(doc: &LoroDoc, page_uuid: &str, shape: &Shape, uui
     let id = uuid.to_owned();
     let t = tree(doc, &schema::shapes_tree_key(page_uuid));
     w.write_shapes(&t, None, std::slice::from_ref(shape), &move |_| id.clone(), &BTreeMap::new());
+}
+
+/// Writes new top-level shapes (with their sub-shapes) into a page tree, on
+/// top of the z-order; `uuid_of` gives each legacy id its uuid.
+pub(crate) fn write_new_shapes(doc: &LoroDoc, page_uuid: &str, shapes: &[Shape], uuid_of: &dyn Fn(u32) -> String) {
+    let seed = int(&doc.get_map(schema::META), "importSeed").unwrap_or(0) as u64;
+    let w = Writer { doc, seed };
+    let t = tree(doc, &schema::shapes_tree_key(page_uuid));
+    w.write_shapes(&t, None, shapes, uuid_of, &BTreeMap::new());
 }
 
 /// Writes `model` into `doc` (uncommitted) and returns the payloads it refers
