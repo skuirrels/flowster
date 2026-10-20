@@ -74,6 +74,39 @@ On a machine with Visio installed, this builds the local comparison corpus in `t
 pwsh tools/visio-oracle/make-corpus.ps1
 ```
 
+## Releases
+
+Flowster is built and published on your own machines, the same way as Mapmeister and Tessera. The
+process, commands and machine setup are in
+[scripts/release-kit/README.md](scripts/release-kit/README.md); Flowster's settings are in
+[release.config.mjs](release.config.mjs).
+
+1. On either machine:
+   ```bash
+   make bump
+   ```
+   Then commit and push it. `make bump` sets the version in `src-tauri/tauri.conf.json`, `Cargo.toml`, `ui/package.json` and `Cargo.lock`.
+2. On the Windows PC:
+   ```bash
+   git pull && make release
+   ```
+   That builds Windows, then Linux in WSL Ubuntu-22.04, then publishes both.
+3. On the Mac:
+   ```bash
+   git pull && make release
+   ```
+   That builds Apple Silicon and Intel, then publishes them.
+
+The download site is https://skuirrels.github.io/flowster-releases/ (GitHub Pages of the public
+`skuirrels/flowster-releases` repo).
+
+Release builds check the site's signed update feed at start-up, and ask in a native dialog before
+installing. The check runs in the host (`src-tauri/src/lib.rs`); the webview has no updater
+permission. Updates are signed with `~/.tauri/flowster-updater.key` (password in
+`flowster-updater.key.password`). Its public half is `plugins.updater.pubkey` in
+`src-tauri/tauri.conf.json`. Copy both files to every build machine and back them up: installed
+copies only accept updates signed with this key.
+
 ## M1 viewer: what renders today
 
 - **Shapes:** pages, background pages, layers (hidden layers), groups, masters with row-level inheritance, and styles with `BasedOn` chains.

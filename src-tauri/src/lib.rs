@@ -9,6 +9,10 @@
 //! the host side and returns a one-time token; `read_picked_document` returns
 //! that file's bytes as a raw binary IPC payload (no base64, §21) and forgets
 //! the token. A compromised page can therefore read only files the user just picked.
+//!
+//! Updates (§21, signed Tauri updater) are the host's own business: release builds check the
+//! signed update feed at start-up and ask in a native dialog before installing.
+//! The webview gets no updater permission.
 
 #![forbid(unsafe_code)]
 
@@ -20,7 +24,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::Serialize;
 use tauri::ipc::Response;
 use tauri::{AppHandle, Manager, State};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use tauri_plugin_updater::UpdaterExt;
 
 /// Matches the engine's own cap on a package (flowster_vsdx::Limits).
 const MAX_DOCUMENT_BYTES: u64 = 2 << 30;
@@ -115,11 +120,34 @@ async fn read_picked_document(token: u64, picked: State<'_, PickedFiles>) -> Res
     Ok(Response::new(bytes))
 }
 
+/// Offers a newer signed release, if the feed has one. Failures (offline, no feed
+/// yet) are silent: the next start-up tries again.
+async fn check_for_update(app: AppHandle) {
+    let Ok(updater) = app.updater() else { return };
+    let Ok(Some(update)) = updater.check().await else { return };
+    let ask = app
+        .dialog()
+        .message(format!(
+            "Flowster {} is available (you have {}). Install it now? Flowster restarts when it's done.",
+            update.version, update.current_version
+        ))
+        .title("Update available")
+        .buttons(MessageDialogButtons::OkCancelCustom("Install and restart".into(), "Later".into()));
+    let Ok(install) = tauri::async_runtime::spawn_blocking(move || ask.blocking_show()).await else { return };
+    if install && update.download_and_install(|_, _| {}, || {}).await.is_ok() {
+        app.restart();
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             app.manage(PickedFiles::default());
+            if !cfg!(debug_assertions) {
+                tauri::async_runtime::spawn(check_for_update(app.handle().clone()));
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![pick_document, read_picked_document, save_document])
