@@ -17,12 +17,13 @@ pub enum Command {
         key: String,
         value: String,
     },
-    /// Draws a new shape on a page. 2-D shapes fill the box `(x, y)`–`(x + w,
-    /// y + h)` (page inches, +Y up); a line runs from `(x, y)` to `(x + w, y + h)`.
+    /// Draws a library shape (`crate::library`) on a page. 2-D shapes fill the
+    /// box `(x, y)`–`(x + w, y + h)` (page inches, +Y up); a line runs from
+    /// `(x, y)` to `(x + w, y + h)`.
     #[serde(rename_all = "camelCase")]
     AddShape {
         page: usize,
-        shape: ShapeKind,
+        shape: String,
         x: f64,
         y: f64,
         w: f64,
@@ -46,7 +47,8 @@ pub enum Command {
         width: f64,
         height: f64,
     },
-    /// Moves the ends of a 1-D shape (page inches).
+    /// Moves the ends of a 1-D shape (page inches). For a connector, an end
+    /// with a glue target follows that shape; one without comes unglued.
     #[serde(rename_all = "camelCase")]
     SetEndpoints {
         page: usize,
@@ -55,11 +57,41 @@ pub enum Command {
         begin_y: f64,
         end_x: f64,
         end_y: f64,
+        #[serde(default)]
+        begin_glue: Option<u32>,
+        #[serde(default)]
+        end_glue: Option<u32>,
+    },
+    /// Draws a dynamic connector, glued at either end to a shape when given.
+    #[serde(rename_all = "camelCase")]
+    AddConnector {
+        page: usize,
+        from: Option<u32>,
+        to: Option<u32>,
+        x0: f64,
+        y0: f64,
+        x1: f64,
+        y1: f64,
+    },
+    /// Copies a shape one step in `direction` (`up`, `down`, `left`, `right`)
+    /// and connects the two (Visio's AutoConnect).
+    #[serde(rename_all = "camelCase")]
+    AutoConnect {
+        page: usize,
+        shape: u32,
+        direction: String,
     },
     #[serde(rename_all = "camelCase")]
     DeleteShapes {
         page: usize,
         shapes: Vec<u32>,
+    },
+    /// Sets ShapeSheet cells on shapes (formatting: fill, line, font, …).
+    #[serde(rename_all = "camelCase")]
+    SetCells {
+        page: usize,
+        shapes: Vec<u32>,
+        cells: Vec<CellEdit>,
     },
     /// Replaces a shape's text (plain text; formatting comes from its rows).
     #[serde(rename_all = "camelCase")]
@@ -73,13 +105,18 @@ pub enum Command {
     Redo,
 }
 
-/// What the drawing tools create.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// One cell to set. `section` names a row section (`Character`, `Paragraph`);
+/// without `row` the value goes to every row the shape has (or row 0).
+/// `value` is in internal units (inches, `#rrggbb`, flags).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum ShapeKind {
-    Rectangle,
-    Ellipse,
-    Line,
+pub struct CellEdit {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row: Option<u32>,
+    pub cell: String,
+    pub value: String,
 }
 
 impl Command {
@@ -87,13 +124,16 @@ impl Command {
     pub fn label(&self) -> &'static str {
         match self {
             Command::SetDocProp { .. } => "Change Document Property",
-            Command::AddShape { shape: ShapeKind::Rectangle, .. } => "Draw Rectangle",
-            Command::AddShape { shape: ShapeKind::Ellipse, .. } => "Draw Ellipse",
-            Command::AddShape { shape: ShapeKind::Line, .. } => "Draw Line",
+            Command::AddShape { shape, .. } if shape == "line" => "Draw Line",
+            Command::AddShape { shape, .. } if shape == "text" => "Add Text",
+            Command::AddShape { .. } => "Add Shape",
             Command::MoveShapes { .. } => "Move",
             Command::SetBounds { .. } | Command::SetEndpoints { .. } => "Resize",
             Command::DeleteShapes { .. } => "Delete",
             Command::SetText { .. } => "Edit Text",
+            Command::SetCells { .. } => "Format",
+            Command::AddConnector { .. } => "Connect Shapes",
+            Command::AutoConnect { .. } => "AutoConnect",
             Command::Undo => "Undo",
             Command::Redo => "Redo",
         }

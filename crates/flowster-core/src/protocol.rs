@@ -62,6 +62,8 @@ pub enum Query {
     Pages,
     /// Display list of one page (index into `Pages`), backgrounds included.
     PageDisplayList { page: usize },
+    /// The built-in shape library with preview outlines.
+    Library,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -173,19 +173,26 @@ impl CommandTarget for Document {
             | Command::SetBounds { .. }
             | Command::SetEndpoints { .. }
             | Command::DeleteShapes { .. }
-            | Command::SetText { .. } => {
+            | Command::SetText { .. }
+            | Command::SetCells { .. }
+            | Command::AddConnector { .. }
+            | Command::AutoConnect { .. } => {
                 let mut ed = crate::edit::Editor { doc: &self.doc, next: &mut self.next_uuid };
                 changes = match cmd {
-                    Command::AddShape { page, shape, x, y, w, h } => ed.add_shape(*page, *shape, *x, *y, *w, *h),
+                    Command::AddShape { page, shape, x, y, w, h } => ed.add_shape(*page, shape, *x, *y, *w, *h),
                     Command::MoveShapes { page, shapes, dx, dy } => ed.move_shapes(*page, shapes, *dx, *dy),
                     Command::SetBounds { page, shape, pin_x, pin_y, width, height } => {
                         ed.set_bounds(*page, *shape, *pin_x, *pin_y, *width, *height)
                     }
-                    Command::SetEndpoints { page, shape, begin_x, begin_y, end_x, end_y } => {
-                        ed.set_endpoints(*page, *shape, (*begin_x, *begin_y), (*end_x, *end_y))
+                    Command::SetEndpoints { page, shape, begin_x, begin_y, end_x, end_y, begin_glue, end_glue } => ed
+                        .set_endpoints(*page, *shape, (*begin_x, *begin_y), (*end_x, *end_y), (*begin_glue, *end_glue)),
+                    Command::AddConnector { page, from, to, x0, y0, x1, y1 } => {
+                        ed.add_connector(*page, *from, *to, (*x0, *y0), (*x1, *y1))
                     }
+                    Command::AutoConnect { page, shape, direction } => ed.auto_connect(*page, *shape, direction),
                     Command::DeleteShapes { page, shapes } => ed.delete_shapes(*page, shapes),
                     Command::SetText { page, shape, text } => ed.set_text(*page, *shape, text),
+                    Command::SetCells { page, shapes, cells } => ed.set_cells(*page, shapes, cells),
                     _ => unreachable!(),
                 }?;
                 self.doc.commit();
@@ -228,18 +235,17 @@ mod tests {
 
     #[test]
     fn drawing_moving_resizing_typing_deleting_and_undo() {
-        use flowster_core::command::ShapeKind;
         let mut d = Document::new_drawing("Drawing1");
         let model = |d: &Document| d.read_model(|_| None);
         assert_eq!(model(&d).pages.len(), 1);
         assert!(!d.undo_state().can_undo);
 
-        let add = |d: &mut Document, shape, x, y, w, h| {
+        let add = |d: &mut Document, shape: String, x, y, w, h| {
             d.exec(&Command::AddShape { page: 0, shape, x, y, w, h }).unwrap().created.unwrap().1
         };
-        let rect = add(&mut d, ShapeKind::Rectangle, 1.0, 1.0, 2.0, 1.0);
-        let ellipse = add(&mut d, ShapeKind::Ellipse, 4.0, 1.0, 2.0, 2.0);
-        let line = add(&mut d, ShapeKind::Line, 1.0, 5.0, 3.0, 4.0);
+        let rect = add(&mut d, "rectangle".into(), 1.0, 1.0, 2.0, 1.0);
+        let ellipse = add(&mut d, "ellipse".into(), 4.0, 1.0, 2.0, 2.0);
+        let line = add(&mut d, "line".into(), 1.0, 5.0, 3.0, 4.0);
         assert_eq!((rect, ellipse, line), (1, 2, 3));
 
         let cell = |d: &Document, id: u32, name: &str| -> f64 {
@@ -251,7 +257,8 @@ mod tests {
         let m = model(&d);
         let s = &m.pages[0].shapes[0];
         assert_eq!(s.sheet.cells["LocPinX"].v.as_deref(), Some("1"));
-        assert_eq!(s.sheet.sections[0].rows[2].cells["X"].v.as_deref(), Some("2"));
+        // Library outlines are relative rows: they scale with the shape.
+        assert_eq!(s.sheet.sections[0].rows[2].t.as_deref(), Some("RelLineTo"));
         assert!((cell(&d, line, "Width") - 5.0).abs() < 1e-9, "3-4-5 line");
         let dl = flowster_render::build_page(&m, 0).unwrap();
         assert_eq!(dl.items.iter().filter(|i| matches!(i, flowster_render::Item::Path { .. })).count(), 3);
@@ -264,13 +271,51 @@ mod tests {
         let m = model(&d);
         let s = &m.pages[0].shapes[0];
         assert_eq!(s.sheet.cells["LocPinX"].v.as_deref(), Some("2"), "LocPin follows Width");
-        assert_eq!(s.sheet.sections[0].rows[2].cells["X"].v.as_deref(), Some("4"), "geometry follows Width");
+        let dl = flowster_render::build_page(&m, 0).unwrap();
+        let [x0, _, x1, _] =
+            flowster_render::DisplayList { items: dl.items[..1].to_vec(), ..dl.clone() }.extents().unwrap();
+        assert!((x1 - x0 - 4.0).abs() < 0.02, "geometry follows Width: {}", x1 - x0);
 
         d.exec(&Command::SetText { page: 0, shape: rect, text: "Hello".into() }).unwrap();
         assert_eq!(model(&d).pages[0].shapes[0].text, Some(vec![TextPiece::Text("Hello".into())]));
 
-        d.exec(&Command::SetEndpoints { page: 0, shape: line, begin_x: 0.0, begin_y: 0.0, end_x: 0.0, end_y: 2.0 })
-            .unwrap();
+        // Formatting: fill, line and the text's font through SetCells.
+        let edit = |section: Option<&str>, cell: &str, value: &str| flowster_core::command::CellEdit {
+            section: section.map(str::to_owned),
+            row: None,
+            cell: cell.into(),
+            value: value.into(),
+        };
+        d.exec(&Command::SetCells {
+            page: 0,
+            shapes: vec![rect],
+            cells: vec![
+                edit(None, "FillForegnd", "#ff0000"),
+                edit(None, "LinePattern", "0"),
+                edit(Some("Character"), "Font", "Arial"),
+                edit(Some("Character"), "Size", "0.25"),
+                edit(Some("Character"), "Style", "1"),
+            ],
+        })
+        .unwrap();
+        let dl = flowster_render::build_page(&model(&d), 0).unwrap();
+        let fmt = &dl.shapes.iter().find(|b| b.id == rect).unwrap().format;
+        assert_eq!(fmt.fill, Some(flowster_core::value::Rgba(255, 0, 0, 255)));
+        assert_eq!(fmt.line, None);
+        assert_eq!((fmt.font.as_str(), fmt.size, fmt.bold), ("Arial", 18.0, true));
+        assert_eq!(d.undo_state().labels[0], "Format");
+
+        d.exec(&Command::SetEndpoints {
+            page: 0,
+            shape: line,
+            begin_x: 0.0,
+            begin_y: 0.0,
+            end_x: 0.0,
+            end_y: 2.0,
+            begin_glue: None,
+            end_glue: None,
+        })
+        .unwrap();
         assert!((cell(&d, line, "Angle") - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
 
         d.exec(&Command::DeleteShapes { page: 0, shapes: vec![ellipse] }).unwrap();
@@ -281,7 +326,63 @@ mod tests {
         assert_eq!(model(&d).pages[0].shapes.len(), 3, "undo restores the ellipse");
         d.exec(&Command::Undo).unwrap();
         d.exec(&Command::Undo).unwrap();
+        d.exec(&Command::Undo).unwrap();
         assert_eq!(model(&d).pages[0].shapes[0].text, None, "undo removes the text");
+    }
+
+    #[test]
+    fn connectors_glue_follow_moves_and_autoconnect() {
+        let mut d = Document::new_drawing("Flow");
+        let add = |d: &mut Document, x: f64| {
+            let cmd = Command::AddShape { page: 0, shape: "process".into(), x, y: 1.0, w: 1.0, h: 1.0 };
+            d.exec(&cmd).unwrap().created.unwrap().1
+        };
+        let (a, b) = (add(&mut d, 1.0), add(&mut d, 4.0));
+        let conn = d
+            .exec(&Command::AddConnector { page: 0, from: Some(a), to: Some(b), x0: 1.5, y0: 1.5, x1: 4.5, y1: 1.5 })
+            .unwrap()
+            .created
+            .unwrap()
+            .1;
+        let ends = |d: &Document| {
+            let m = d.read_model(|_| None);
+            let calc = flowster_core::calc::Calc::for_page(&m, &m.pages[0]);
+            ["BeginX", "BeginY", "EndX", "EndY"].map(|n| calc.cell(conn, n).num().unwrap())
+        };
+        // Facing sides: a's right edge to b's left edge.
+        assert_eq!(ends(&d), [2.0, 1.5, 4.0, 1.5]);
+        // Moving b drags the connector's end along, with a right-angle path.
+        d.exec(&Command::MoveShapes { page: 0, shapes: vec![b], dx: 0.0, dy: 2.0 }).unwrap();
+        assert_eq!(ends(&d), [2.0, 1.5, 4.0, 3.5]);
+        let m = d.read_model(|_| None);
+        let s = m.pages[0].shapes.iter().find(|s| s.id == conn).unwrap();
+        assert_eq!(s.sheet.sections[0].rows.len(), 4, "Z-shaped route");
+
+        // AutoConnect: a copy below `a`, connected to it.
+        let changes = d.exec(&Command::AutoConnect { page: 0, shape: a, direction: "down".into() }).unwrap();
+        let copy = changes.created.unwrap().1;
+        let m = d.read_model(|_| None);
+        let calc = flowster_core::calc::Calc::for_page(&m, &m.pages[0]);
+        assert_eq!((calc.cell(copy, "PinX").num().unwrap(), calc.cell(copy, "PinY").num().unwrap()), (1.5, -0.25));
+        let connects = flowster_core::library::derive_connects(&m.pages[0]);
+        assert_eq!(connects.len(), 4);
+        assert!(connects.iter().any(|c| c.to_sheet == copy));
+    }
+
+    #[test]
+    fn swimlanes_go_behind_the_drawing() {
+        let mut d = Document::new_drawing("Lanes");
+        let add = |d: &mut Document, shape: &str, w: f64, h: f64| {
+            let cmd = Command::AddShape { page: 0, shape: shape.into(), x: 1.0, y: 1.0, w, h };
+            d.exec(&cmd).unwrap().created.unwrap().1
+        };
+        let step = add(&mut d, "process", 1.5, 0.9);
+        let pool = add(&mut d, "pool", 8.0, 4.9);
+        let m = d.read_model(|_| None);
+        let order: Vec<u32> = m.pages[0].shapes.iter().map(|s| s.id).collect();
+        assert_eq!(order.len(), 5, "a frame and three lanes, then the step");
+        assert_eq!(order[0], pool);
+        assert_eq!(*order.last().unwrap(), step);
     }
 
     #[test]

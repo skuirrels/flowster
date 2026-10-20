@@ -3,8 +3,46 @@
 
 import { useEffect, useState } from "react";
 
-import type { Command, DisplayList, DocInfo, ShapeBox } from "../engine/protocol";
+import type { CellEdit, Command, DisplayList, DocInfo, ShapeBox } from "../engine/protocol";
+import { ColorPicker, fmt as cells, hex } from "./FormatBar";
 import { Icon } from "./icons";
+
+/** Arrowheads offered for lines and connectors (Visio arrow kinds). */
+const ARROWS: [number, string][] = [
+  [0, "None"],
+  [4, "Filled arrow"],
+  [2, "Small filled arrow"],
+  [13, "Long filled arrow"],
+  [1, "Open arrow"],
+  [3, "Open arrow (wide)"],
+  [16, "Hollow arrow"],
+  [10, "Dot"],
+  [20, "Hollow dot"],
+  [22, "Diamond"],
+  [11, "Square"],
+  [24, "Tick (one)"],
+  [27, "Crow's foot (many)"],
+  [29, "Zero or many"],
+  [31, "Zero or one"],
+];
+
+function ArrowSelect({ label, value, onPick }: { label: string; value: number; onPick: (v: number) => void }) {
+  return (
+    <label className="field wide">
+      <span className="field-label">{label}</span>
+      <span className="field-box">
+        <select value={value} onChange={(e) => onPick(Number(e.target.value))}>
+          {!ARROWS.some(([k]) => k === value) && <option value={value}>Type {value}</option>}
+          {ARROWS.map(([k, name]) => (
+            <option key={k} value={k}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </span>
+    </label>
+  );
+}
 
 const fmt = (v: number) => (Math.abs(v) < 5e-5 ? "0" : v.toFixed(3).replace(/\.?0+$/, ""));
 
@@ -133,6 +171,8 @@ export function Inspector({
   const { pinX, pinY, angle } = shapeFrame(b);
   const bounds = (patch: Partial<{ pinX: number; pinY: number; width: number; height: number }>) =>
     onCommand({ kind: "setBounds", page, shape: b.id, pinX, pinY, width: b.width, height: b.height, ...patch });
+  const format = (edits: CellEdit[]) => onCommand({ kind: "setCells", page, shapes: [b.id], cells: edits });
+  const f = b.format;
   const ends = (patch: Partial<{ beginX: number; beginY: number; endX: number; endY: number }>) =>
     onCommand({
       kind: "setEndpoints",
@@ -149,7 +189,7 @@ export function Inspector({
     <aside className="inspector" aria-label="Inspector">
       <div className="insp-title">
         <Icon name={oneD ? "line" : "rectangle"} size={16} />
-        <span>{oneD ? "Line" : "Shape"}</span>
+        <span>{b.connector ? "Connector" : oneD ? "Line" : "Shape"}</span>
         <span className="insp-id">#{b.id}</span>
       </div>
       {oneD ? (
@@ -187,6 +227,34 @@ export function Inspector({
           </Section>
         </>
       )}
+      <Section title="Style">
+        <div className="style-row">
+          {!oneD && (
+            <span className="style-item">
+              <ColorPicker icon="fill" label="Fill" value={hex(f.fill)} allowNone noneLabel="No fill" onPick={(c) => format(cells.fill(c))} />
+              Fill
+            </span>
+          )}
+          <span className="style-item">
+            <ColorPicker icon="lineColor" label="Line colour" value={hex(f.line)} allowNone noneLabel="No line" onPick={(c) => format(cells.line(c))} />
+            Line
+          </span>
+          <span className="style-item">
+            <ColorPicker icon="text" label="Text colour" value={hex(f.textColor)} onPick={(c) => c && format(cells.textColor(c))} />
+            Text
+          </span>
+        </div>
+        {oneD ? (
+          <div className="field-grid one">
+            <ArrowSelect label="Begin arrow" value={f.beginArrow} onPick={(v) => format(cells.beginArrow(v))} />
+            <ArrowSelect label="End arrow" value={f.endArrow} onPick={(v) => format(cells.endArrow(v))} />
+          </div>
+        ) : (
+          <div className="field-grid">
+            <Num label="Rounding" value={f.rounding} min={0} onCommit={(v) => format(cells.rounding(v))} />
+          </div>
+        )}
+      </Section>
       <Section title="Text">
         <TextField
           key={b.id}

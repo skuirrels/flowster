@@ -11,6 +11,7 @@ pub mod command;
 pub mod determinism;
 pub mod formula;
 pub mod geom;
+pub mod library;
 pub mod model;
 pub mod protocol;
 pub mod resolve;

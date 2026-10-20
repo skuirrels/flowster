@@ -68,6 +68,46 @@ pub struct ShapeBox {
     /// The shape's text, for editing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Shapes a connector's ends are glued to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub begin_glue: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_glue: Option<u32>,
+    /// A dynamic connector (`ObjType` 2).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub connector: bool,
+    /// How the shape looks now (resolved through styles, masters and theme).
+    pub format: ShapeFormat,
+}
+
+/// A shape's resolved formatting, for the format controls.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShapeFormat {
+    /// Representative fill colour; `None` when the shape has no fill.
+    pub fill: Option<Rgba>,
+    /// Line colour; `None` when the shape has no line.
+    pub line: Option<Rgba>,
+    /// Points.
+    pub line_weight: f64,
+    pub line_pattern: u32,
+    /// Corner rounding, inches.
+    pub rounding: f64,
+    pub font: String,
+    /// Points.
+    pub size: f64,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strike: bool,
+    pub text_color: Rgba,
+    /// 0 left, 1 centre, 2 right, 3 justify.
+    pub align: u8,
+    /// 0 top, 1 middle, 2 bottom.
+    pub valign: u8,
+    /// Visio arrowhead kinds at the line's begin and end (0 = none).
+    pub begin_arrow: u32,
+    pub end_arrow: u32,
 }
 
 impl DisplayList {
@@ -405,6 +445,7 @@ impl<'d> Builder<'d> {
             let text = r.text().map(|pieces| {
                 pieces.iter().filter_map(|p| if let TextPiece::Text(t) = p { Some(t.as_str()) } else { None }).collect()
             });
+            let format = self.format_of(&r, world, w, h);
             let b = ShapeBox {
                 id: shape.id,
                 transform: world,
@@ -413,6 +454,10 @@ impl<'d> Builder<'d> {
                 begin: end("BeginX", "BeginY"),
                 end: end("EndX", "EndY"),
                 text,
+                begin_glue: flowster_core::library::glue_target(&shape.sheet, "BegTrigger"),
+                end_glue: flowster_core::library::glue_target(&shape.sheet, "EndTrigger"),
+                connector: r.num("ObjType") == Some(2.0),
+                format,
             };
             if let Some(boxes) = &mut self.boxes {
                 boxes.push(b);
@@ -522,16 +567,8 @@ impl<'d> Builder<'d> {
         }
 
         let fill = if fill_segs.is_empty() { None } else { self.fill_paint(r, world, w, h) };
-        let line_pattern = self.num(r, "LinePattern", |t| Some(t.line(r).and_then(|l| l.pattern).unwrap_or(1.0)), 1.0);
-        let weight = self
-            .num(
-                r,
-                "LineWeight",
-                |t| t.line(r).and_then(|l| l.width_emu).map(|e| e / EMU_PER_INCH),
-                DEFAULT_LINE_WEIGHT,
-            )
-            .max(0.0)
-            * world.mean_scale();
+        let (line_pattern, weight) = self.line_pattern_weight(r);
+        let weight = weight * world.mean_scale();
         let stroke = if line_pattern != 0.0 && !stroke_segs.is_empty() {
             let color = self.color(r, "LineColor", |t| t.line_color(r), Rgba::BLACK);
             Some(Stroke {
@@ -603,6 +640,94 @@ impl<'d> Builder<'d> {
     }
 
     /// The fill of a closed shape: modern gradient, legacy gradient, hatch or solid.
+    /// `LinePattern` and `LineWeight` (inches) after styles and theme.
+    fn line_pattern_weight(&self, r: &Resolved<'_>) -> (f64, f64) {
+        let pattern = self.num(r, "LinePattern", |t| Some(t.line(r).and_then(|l| l.pattern).unwrap_or(1.0)), 1.0);
+        let weight = self
+            .num(
+                r,
+                "LineWeight",
+                |t| t.line(r).and_then(|l| l.width_emu).map(|e| e / EMU_PER_INCH),
+                DEFAULT_LINE_WEIGHT,
+            )
+            .max(0.0);
+        (pattern, weight)
+    }
+
+    /// The resolved format of a shape (what the format controls show).
+    fn format_of(&self, r: &Resolved<'_>, world: Affine, w: f64, h: f64) -> ShapeFormat {
+        let mut sections = r.sections("Geometry");
+        self.compute_missing(r, &mut sections);
+        let paths = sections_to_paths(&sections, w, h);
+        let closed = paths.iter().any(|p| p.closed && !p.no_fill && !p.no_show);
+        let lined = paths.iter().any(|p| !p.no_line && !p.no_show);
+        let fill = if closed { self.fill_paint(r, world, w, h).map(|p| p.representative()) } else { None };
+        let (pattern, weight) = self.line_pattern_weight(r);
+        let line = (pattern != 0.0 && lined).then(|| self.color(r, "LineColor", |t| t.line_color(r), Rgba::BLACK));
+        let rounding =
+            self.num(r, "Rounding", |t| t.line(r).and_then(|l| l.rounding_emu).map(|e| e / EMU_PER_INCH), 0.0);
+        let chars = r.sections("Character");
+        let paras = r.sections("Paragraph");
+        let themer = self.themer(r);
+        let run = self.char_run(r, &chars, themer.as_ref(), 0);
+        let align = match r.text_row(&paras, "Paragraph", 0, "HorzAlign") {
+            Lookup::Value(v) => parse_num(v).unwrap_or(1.0),
+            _ => 1.0,
+        };
+        ShapeFormat {
+            fill,
+            line,
+            line_weight: weight * 72.0,
+            line_pattern: pattern.max(0.0) as u32,
+            rounding,
+            font: run.font,
+            size: run.size * 72.0,
+            bold: run.bold,
+            italic: run.italic,
+            underline: run.underline,
+            strike: run.strike,
+            text_color: run.color,
+            align: align.clamp(0.0, 4.0) as u8,
+            valign: r.num("VerticalAlign").unwrap_or(1.0).clamp(0.0, 2.0) as u8,
+            begin_arrow: self.num(r, "BeginArrow", |t| t.line(r).and_then(|l| l.begin_arrow), 0.0).max(0.0) as u32,
+            end_arrow: self.num(r, "EndArrow", |t| t.line(r).and_then(|l| l.end_arrow), 0.0).max(0.0) as u32,
+        }
+    }
+
+    /// The character format of Character row `ix` (empty text).
+    fn char_run(&self, r: &Resolved<'_>, chars: &[MergedSection], themer: Option<&Themer<'d>>, ix: u32) -> Run {
+        let v = |cell: &str| r.text_row(chars, "Character", ix, cell);
+        let num = |cell: &str| match v(cell) {
+            Lookup::Value(s) => parse_num(s),
+            _ => None,
+        };
+        let style = match v("Style") {
+            Lookup::Value(s) => parse_num(s).unwrap_or(0.0),
+            Lookup::Themed => themer.and_then(|t| t.font(r)).and_then(|f| f.style).unwrap_or(0.0),
+            Lookup::Missing => 0.0,
+        } as i64;
+        let font = match v("Font") {
+            Lookup::Value(f) if parse_num(f).is_none() && !f.trim().is_empty() => f.to_owned(),
+            Lookup::Themed => themer.and_then(|t| t.theme.minor_font.clone()).unwrap_or_else(|| DEFAULT_FONT.into()),
+            _ => DEFAULT_FONT.to_owned(),
+        };
+        let color = match v("Color") {
+            Lookup::Value(c) => parse_color(c, &self.doc.colors).unwrap_or(Rgba::BLACK),
+            Lookup::Themed => themer.and_then(|t| t.font_color(r)).unwrap_or(Rgba::BLACK),
+            Lookup::Missing => Rgba::BLACK,
+        };
+        Run {
+            text: String::new(),
+            font,
+            size: num("Size").filter(|s| *s > 0.0).unwrap_or(DEFAULT_FONT_SIZE),
+            color: color.with_transparency(num("ColorTrans").unwrap_or(0.0)),
+            bold: style & 1 != 0,
+            italic: style & 2 != 0,
+            underline: style & 4 != 0,
+            strike: num("Strikethru").unwrap_or(0.0) != 0.0,
+        }
+    }
+
     fn fill_paint(&self, r: &Resolved<'_>, world: Affine, w: f64, h: f64) -> Option<Paint> {
         let pattern =
             self.num(r, "FillPattern", |t| Some(t.fill(r).and_then(|f| f.pattern).unwrap_or(1.0)), 1.0) as i64;
@@ -843,40 +968,7 @@ impl<'d> Builder<'d> {
         let chars = r.sections("Character");
         let paras = r.sections("Paragraph");
         let themer = self.themer(r);
-        let font = |ix: u32| -> Run {
-            let v = |cell: &str| r.text_row(&chars, "Character", ix, cell);
-            let num = |cell: &str| match v(cell) {
-                Lookup::Value(s) => parse_num(s),
-                _ => None,
-            };
-            let style = match v("Style") {
-                Lookup::Value(s) => parse_num(s).unwrap_or(0.0),
-                Lookup::Themed => themer.as_ref().and_then(|t| t.font(r)).and_then(|f| f.style).unwrap_or(0.0),
-                Lookup::Missing => 0.0,
-            } as i64;
-            let font = match v("Font") {
-                Lookup::Value(f) if parse_num(f).is_none() && !f.trim().is_empty() => f.to_owned(),
-                Lookup::Themed => {
-                    themer.as_ref().and_then(|t| t.theme.minor_font.clone()).unwrap_or_else(|| DEFAULT_FONT.into())
-                }
-                _ => DEFAULT_FONT.to_owned(),
-            };
-            let color = match v("Color") {
-                Lookup::Value(c) => parse_color(c, &self.doc.colors).unwrap_or(Rgba::BLACK),
-                Lookup::Themed => themer.as_ref().and_then(|t| t.font_color(r)).unwrap_or(Rgba::BLACK),
-                Lookup::Missing => Rgba::BLACK,
-            };
-            Run {
-                text: String::new(),
-                font,
-                size: num("Size").filter(|s| *s > 0.0).unwrap_or(DEFAULT_FONT_SIZE),
-                color: color.with_transparency(num("ColorTrans").unwrap_or(0.0)),
-                bold: style & 1 != 0,
-                italic: style & 2 != 0,
-                underline: style & 4 != 0,
-                strike: num("Strikethru").unwrap_or(0.0) != 0.0,
-            }
-        };
+        let font = |ix: u32| -> Run { self.char_run(r, &chars, themer.as_ref(), ix) };
         let para = |ix: u32| -> Paragraph {
             let v = |cell: &str| match r.text_row(&paras, "Paragraph", ix, cell) {
                 Lookup::Value(s) => parse_num(s),

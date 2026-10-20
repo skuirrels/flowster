@@ -27,7 +27,24 @@ export type IconName =
   | "chevron"
   | "selectAll"
   | "close"
-  | "page";
+  | "page"
+  | "connector"
+  | "shapes"
+  | "bold"
+  | "italic"
+  | "underline"
+  | "alignLeft"
+  | "alignCenter"
+  | "alignRight"
+  | "fill"
+  | "lineColor"
+  | "lineWeight"
+  | "dash"
+  | "valignTop"
+  | "valignMiddle"
+  | "valignBottom"
+  | "search"
+  | "noColor";
 
 const paths: Record<IconName, ReactNode> = {
   logo: (
@@ -137,6 +154,63 @@ const paths: Record<IconName, ReactNode> = {
     </>
   ),
   close: <path d="M6 6l12 12M18 6 6 18" />,
+  connector: (
+    <>
+      <rect x="2.5" y="3" width="6" height="5" rx="1.2" />
+      <rect x="15.5" y="16" width="6" height="5" rx="1.2" />
+      <path d="M8.5 5.5H12v13h3.5M13.5 16.5l2 2-2 2" />
+    </>
+  ),
+  shapes: (
+    <>
+      <rect x="3" y="3" width="8" height="8" rx="1.5" />
+      <circle cx="17" cy="7" r="4" />
+      <path d="M7 14l4.5 7h-9z" />
+      <rect x="13.5" y="14" width="7" height="7" rx="1.5" transform="rotate(45 17 17.5)" />
+    </>
+  ),
+  bold: <path d="M7 4h6a4 4 0 0 1 0 8H7zM7 12h7a4 4 0 0 1 0 8H7z" />,
+  italic: <path d="M10 4h8M6 20h8M14 4l-4 16" />,
+  underline: <path d="M7 4v7a5 5 0 0 0 10 0V4M5 20h14" />,
+  alignLeft: <path d="M4 6h16M4 10h10M4 14h16M4 18h10" />,
+  alignCenter: <path d="M4 6h16M7 10h10M4 14h16M7 18h10" />,
+  alignRight: <path d="M4 6h16M10 10h10M4 14h16M10 18h10" />,
+  fill: (
+    <>
+      <path d="m5 12 7-7 7 7-7 7z" />
+      <path d="M12 5 9 2M19 12v0" />
+      <path d="M20 16s1.5 1.8 1.5 3a1.5 1.5 0 0 1-3 0c0-1.2 1.5-3 1.5-3z" />
+    </>
+  ),
+  lineColor: (
+    <>
+      <path d="M4 20h16" strokeWidth="3" />
+      <path d="m14.5 4.5 4 4L9 18H5v-4z" />
+    </>
+  ),
+  lineWeight: (
+    <>
+      <path d="M4 6h16" strokeWidth="1" />
+      <path d="M4 11h16" strokeWidth="2" />
+      <path d="M4 17h16" strokeWidth="3.5" />
+    </>
+  ),
+  dash: <path d="M3 12h4M10 12h4M17 12h4" />,
+  valignTop: <path d="M4 4h16M12 8v12M8 12l4-4 4 4" />,
+  valignMiddle: <path d="M4 12h16M12 3v5M12 16v5M9 6l3 2 3-2M9 18l3-2 3 2" />,
+  valignBottom: <path d="M4 20h16M12 4v12M8 12l4 4 4-4" />,
+  search: (
+    <>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="m20 20-4.2-4.2" />
+    </>
+  ),
+  noColor: (
+    <>
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <path d="M5 19 19 5" />
+    </>
+  ),
   page: (
     <>
       <path d="M6 3h8l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />

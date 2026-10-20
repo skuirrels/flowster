@@ -9,7 +9,16 @@ export type ShapeRef = { page: number; id: number };
 
 // ---- commands (the command bus, §5.5) --------------------------------------
 
-export type ShapeKind = "rectangle" | "ellipse" | "line";
+/** A library shape id (`rectangle`, `process`, `line`, `pool`, …; see the `library` query). */
+export type ShapeKind = string;
+
+/** One cell to set: a single cell, or a `Character`/`Paragraph` row cell (all rows unless `row`). */
+export interface CellEdit {
+  section?: string;
+  row?: number;
+  cell: string;
+  value: string;
+}
 
 export type Command =
   | { kind: "setDocProp"; key: string; value: string }
@@ -17,7 +26,21 @@ export type Command =
   | { kind: "addShape"; page: number; shape: ShapeKind; x: number; y: number; w: number; h: number }
   | { kind: "moveShapes"; page: number; shapes: number[]; dx: number; dy: number }
   | { kind: "setBounds"; page: number; shape: number; pinX: number; pinY: number; width: number; height: number }
-  | { kind: "setEndpoints"; page: number; shape: number; beginX: number; beginY: number; endX: number; endY: number }
+  | {
+      kind: "setEndpoints";
+      page: number;
+      shape: number;
+      beginX: number;
+      beginY: number;
+      endX: number;
+      endY: number;
+      /** Connectors: the shapes the ends glue to (absent = unglued). */
+      beginGlue?: number;
+      endGlue?: number;
+    }
+  | { kind: "setCells"; page: number; shapes: number[]; cells: CellEdit[] }
+  | { kind: "addConnector"; page: number; from: number | null; to: number | null; x0: number; y0: number; x1: number; y1: number }
+  | { kind: "autoConnect"; page: number; shape: number; direction: "up" | "down" | "left" | "right" }
   | { kind: "deleteShapes"; page: number; shapes: number[] }
   | { kind: "setText"; page: number; shape: number; text: string }
   | { kind: "undo" }
@@ -30,7 +53,18 @@ export type Query =
   | { kind: "docInfo" }
   | { kind: "derivedStateHash" }
   | { kind: "pages" }
-  | { kind: "pageDisplayList"; page: number };
+  | { kind: "pageDisplayList"; page: number }
+  | { kind: "library" };
+
+/** A Shapes panel entry; `preview` is an SVG path in a `width` × `height` box (y down). */
+export interface LibraryEntry {
+  id: string;
+  name: string;
+  category: string;
+  width: number;
+  height: number;
+  preview: string;
+}
 
 export type PackageKind =
   | "drawing"
@@ -196,6 +230,34 @@ export interface ShapeBox {
   begin?: [number, number];
   end?: [number, number];
   text?: string;
+  /** Shapes a connector's ends are glued to. */
+  beginGlue?: number;
+  endGlue?: number;
+  connector?: boolean;
+  format: ShapeFormat;
+}
+
+/** A shape's resolved formatting. */
+export interface ShapeFormat {
+  fill: Rgba | null;
+  line: Rgba | null;
+  /** Points. */
+  lineWeight: number;
+  linePattern: number;
+  rounding: number;
+  font: string;
+  /** Points. */
+  size: number;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  strike: boolean;
+  textColor: Rgba;
+  align: number;
+  valign: number;
+  /** Visio arrowhead kinds (0 = none). */
+  beginArrow: number;
+  endArrow: number;
 }
 
 export interface DisplayList {
@@ -216,7 +278,9 @@ export type QueryResult<Q extends Query> = Q extends { kind: "packageParts" }
         ? PageInfo[]
         : Q extends { kind: "pageDisplayList" }
           ? DisplayList
-          : never;
+          : Q extends { kind: "library" }
+            ? LibraryEntry[]
+            : never;
 
 // ---- requests ---------------------------------------------------------------
 

@@ -2,25 +2,30 @@
 // list on demand, and turns pointer gestures into editing commands (SPEC §9).
 // React renders the frame; drawing and gestures are imperative.
 
-import { useCallback, useEffect, useImperativeHandle, useRef, type Ref } from "react";
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 
-import type { Command, DisplayList, ShapeKind } from "../engine/protocol";
+import { SHAPE_MIME } from "../chrome/ShapesPanel";
+import type { Command, DisplayList, ShapeBox, ShapeKind } from "../engine/protocol";
 import {
+  arrowsFor,
   corners,
   drawOverlay,
   handles,
+  hitArrow,
   hitShape,
   isOneD,
   pageBounds,
   resized,
   toPage,
   toScreen,
+  type Direction,
   type Overlay,
   type Pt,
 } from "./edit";
 import { fitView, render, type Theme, type View } from "./renderer";
 
-export type Tool = "select" | ShapeKind;
+/** `select`, the text and connector tools, or a library shape to draw by dragging. */
+export type Tool = "select" | "text" | "connector" | ShapeKind;
 
 export interface CanvasHandle {
   fit(): void;
@@ -28,6 +33,8 @@ export interface CanvasHandle {
   setZoom(pxPerInch: number): void;
   /** A shape's on-screen bounds in CSS pixels relative to the canvas: [x, y, w, h]. */
   screenBounds(id: number): [number, number, number, number] | null;
+  /** The page point at the middle of the view. */
+  viewCentre(): Pt | null;
 }
 
 const MIN_ZOOM = 2;
@@ -43,7 +50,8 @@ type Gesture =
   | { kind: "pan"; x: number; y: number }
   | { kind: "move"; start: Pt; cur: Pt; ids: number[] }
   | { kind: "resize"; id: number; handle: number; cur: Pt }
-  | { kind: "draw"; shape: ShapeKind; start: Pt; cur: Pt; startPx: Pt; curPx: Pt }
+  | { kind: "draw"; shape: ShapeKind; start: Pt; cur: Pt }
+  | { kind: "connect"; from: number | null; start: Pt; cur: Pt }
   | { kind: "marquee"; start: Pt; cur: Pt; additive: boolean };
 
 function themeColors(el: HTMLElement): Theme {
@@ -54,6 +62,11 @@ function themeColors(el: HTMLElement): Theme {
   };
 }
 
+const centre = (b: ShapeBox): Pt => {
+  const [x0, y0, x1, y1] = pageBounds(b);
+  return [(x0 + x1) / 2, (y0 + y1) / 2];
+};
+
 export function CanvasView({
   dl,
   tool,
@@ -61,6 +74,7 @@ export function CanvasView({
   onSelection,
   onCommand,
   onEditText,
+  onDropShape,
   onZoomChange,
   ref,
 }: {
@@ -70,6 +84,8 @@ export function CanvasView({
   onSelection: (ids: number[]) => void;
   onCommand: (cmd: Command) => void;
   onEditText: (id: number) => void;
+  /** A Shapes-panel shape dropped at a page point. */
+  onDropShape: (id: string, at: Pt) => void;
   onZoomChange: (pxPerInch: number) => void;
   ref?: Ref<CanvasHandle>;
 }) {
@@ -78,19 +94,30 @@ export function CanvasView({
   const frame = useRef(0);
   const gesture = useRef<Gesture | null>(null);
   const space = useRef(false);
+  const hotArrow = useRef<Direction | null>(null);
+  const hover = useRef<number | null>(null);
   const lastPage = useRef<number | null>(null);
   const sel = useRef(selection);
   sel.current = selection;
+  const [dropping, setDropping] = useState(false);
 
   const H = dl.page.height;
   const page = dl.page.index;
   const boxOf = useCallback((id: number) => dl.shapes.find((b) => b.id === id) ?? null, [dl]);
+  const outline = (b: ShapeBox): Pt[] => (isOneD(b) ? [b.begin!, b.end!] : corners(b));
+
+  /** The AutoConnect arrows of the single selected 2-D shape. */
+  const arrows = useCallback(() => {
+    const v = view.current;
+    if (!v || tool !== "select" || gesture.current || sel.current.length !== 1) return [];
+    const b = boxOf(sel.current[0]);
+    return b && !isOneD(b) ? arrowsFor(b, v, H, hotArrow.current) : [];
+  }, [boxOf, H, tool]);
 
   const overlay = useCallback((): Overlay => {
     const g = gesture.current;
     const selected = sel.current.map(boxOf).filter((b) => b !== null);
-    const outline = (b: (typeof selected)[number]): Pt[] => (isOneD(b) ? [b.begin!, b.end!] : corners(b));
-    const o: Overlay = { selected: selected.map(outline), handles: [] };
+    const o: Overlay = { selected: selected.map(outline), handles: [], arrows: arrows() };
     if (!g && selected.length === 1) o.handles = handles(selected[0]);
     if (g?.kind === "move") {
       const [dx, dy] = [g.cur[0] - g.start[0], g.cur[1] - g.start[1]];
@@ -99,6 +126,8 @@ export function CanvasView({
       const b = boxOf(g.id);
       if (b && isOneD(b)) {
         o.preview = { kind: "segment", pts: g.handle === 0 ? [g.cur, b.end!] : [b.begin!, g.cur] };
+        const t = hover.current !== null ? boxOf(hover.current) : null;
+        if (b.connector && t) o.target = corners(t);
       } else if (b) {
         const r = resized(b, g.handle, g.cur);
         if (r) o.preview = { kind: "polygon", pts: r.frame };
@@ -106,13 +135,21 @@ export function CanvasView({
     } else if (g?.kind === "draw") {
       const [a, c] = [g.start, g.cur];
       const pts: Pt[] = [a, [c[0], a[1]], c, [a[0], c[1]]];
-      o.preview = g.shape === "line" ? { kind: "segment", pts: [a, c] } : { kind: g.shape === "ellipse" ? "ellipse" : "polygon", pts };
+      o.preview =
+        g.shape === "line" ? { kind: "segment", pts: [a, c] } : { kind: g.shape === "ellipse" ? "ellipse" : "polygon", pts };
+    } else if (g?.kind === "connect") {
+      o.preview = { kind: "segment", pts: [g.start, g.cur] };
+      const t = hover.current !== null ? boxOf(hover.current) : null;
+      if (t) o.target = corners(t);
     } else if (g?.kind === "marquee" && view.current) {
       const [s0, s1] = [toScreen(view.current, H, g.start), toScreen(view.current, H, g.cur)];
       o.marquee = [s0[0], s0[1], s1[0], s1[1]];
+    } else if (!g && tool === "connector" && hover.current !== null) {
+      const t = boxOf(hover.current);
+      if (t) o.target = corners(t);
     }
     return o;
-  }, [boxOf, H]);
+  }, [arrows, boxOf, H, tool]);
 
   const draw = useCallback(() => {
     cancelAnimationFrame(frame.current);
@@ -128,7 +165,7 @@ export function CanvasView({
     });
   }, [dl, H, overlay]);
 
-  useEffect(draw, [selection, draw]);
+  useEffect(draw, [selection, tool, draw]);
 
   const setView = useCallback(
     (v: View) => {
@@ -175,6 +212,11 @@ export function CanvasView({
         const [sx0, sy0] = toScreen(v, H, [x0, y1]);
         const [sx1, sy1] = toScreen(v, H, [x1, y0]);
         return [sx0, sy0, sx1 - sx0, sy1 - sy0];
+      },
+      viewCentre: () => {
+        const c = canvasRef.current;
+        const v = view.current;
+        return c && v ? toPage(v, H, [c.clientWidth / 2, c.clientHeight / 2]) : null;
       },
     }),
     [fit, zoomAt, boxOf, H],
@@ -247,6 +289,14 @@ export function CanvasView({
     return [e.clientX - r.left, e.clientY - r.top];
   };
 
+  /** The shape under a page point other than `except` (connector targets skip connectors). */
+  const targetAt = (p: Pt, except: number | null): ShapeBox | null => {
+    const v = view.current;
+    if (!v) return null;
+    const candidates = dl.shapes.filter((b) => b.id !== except && !isOneD(b));
+    return hitShape(candidates, p, SLACK / v.zoom);
+  };
+
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const v = view.current;
     if (!v) return;
@@ -259,8 +309,21 @@ export function CanvasView({
       return;
     }
     if (e.button !== 0) return;
+    if (tool === "connector") {
+      const from = targetAt(p, null);
+      gesture.current = { kind: "connect", from: from?.id ?? null, start: from ? centre(from) : p, cur: p };
+      draw();
+      return;
+    }
     if (tool !== "select") {
-      gesture.current = { kind: "draw", shape: tool, start: p, cur: p, startPx: sp, curPx: sp };
+      gesture.current = { kind: "draw", shape: tool, start: p, cur: p };
+      return;
+    }
+    // AutoConnect arrows of the selected shape.
+    const dir = hitArrow(arrows(), sp);
+    if (dir && sel.current.length === 1) {
+      onCommand({ kind: "autoConnect", page, shape: sel.current[0], direction: dir });
+      hotArrow.current = null;
       return;
     }
     // A handle of the single selected shape?
@@ -304,9 +367,22 @@ export function CanvasView({
     const sp = local(e);
     const p = toPage(v, H, sp);
     if (!g) {
-      // Hover feedback.
+      // Hover feedback: arrows, connector targets, cursors.
+      const dir = hitArrow(arrows(), sp);
+      const changed = dir !== hotArrow.current;
+      hotArrow.current = dir;
+      if (tool === "connector") {
+        const t = targetAt(p, null)?.id ?? null;
+        if (t !== hover.current) {
+          hover.current = t;
+          draw();
+        }
+        canvas.style.cursor = "crosshair";
+        return;
+      }
+      if (changed) draw();
       const over = tool === "select" && hitShape(dl.shapes, p, SLACK / v.zoom);
-      canvas.style.cursor = tool !== "select" ? "crosshair" : over ? "move" : "default";
+      canvas.style.cursor = dir ? "pointer" : tool === "text" ? "text" : tool !== "select" ? "crosshair" : over ? "move" : "default";
       return;
     }
     if (g.kind === "pan") {
@@ -314,8 +390,11 @@ export function CanvasView({
       gesture.current = { ...g, x: e.clientX, y: e.clientY };
       return;
     }
-    if (g.kind === "draw") gesture.current = { ...g, cur: p, curPx: sp };
-    else gesture.current = { ...g, cur: p };
+    if (g.kind === "connect" || g.kind === "resize") {
+      const self = g.kind === "resize" ? g.id : g.from;
+      hover.current = targetAt(p, self)?.id ?? null;
+    }
+    gesture.current = { ...g, cur: p };
     draw();
   };
 
@@ -323,6 +402,8 @@ export function CanvasView({
     const v = view.current;
     const g = gesture.current;
     gesture.current = null;
+    const target = hover.current;
+    hover.current = null;
     if (!v || !g) return;
     const px = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]) * v.zoom;
     if (g.kind === "move" && px(g.start, g.cur) > CLICK / 2) {
@@ -331,10 +412,18 @@ export function CanvasView({
       const b = boxOf(g.id);
       if (b && isOneD(b)) {
         const [bg, en] = g.handle === 0 ? [g.cur, b.end!] : [b.begin!, g.cur];
-        onCommand({ kind: "setEndpoints", page, shape: b.id, beginX: bg[0], beginY: bg[1], endX: en[0], endY: en[1] });
+        // A connector end dropped on a shape glues to it; elsewhere it comes free.
+        const beginGlue = g.handle === 0 ? (target ?? undefined) : b.beginGlue;
+        const endGlue = g.handle === 1 ? (target ?? undefined) : b.endGlue;
+        onCommand({ kind: "setEndpoints", page, shape: b.id, beginX: bg[0], beginY: bg[1], endX: en[0], endY: en[1], beginGlue, endGlue });
       } else if (b) {
         const r = resized(b, g.handle, g.cur);
         if (r) onCommand({ kind: "setBounds", page, shape: b.id, ...r.bounds });
+      }
+    } else if (g.kind === "connect") {
+      if (px(g.start, g.cur) > CLICK || target !== null) {
+        const end = target !== null ? centre(boxOf(target)!) : g.cur;
+        onCommand({ kind: "addConnector", page, from: g.from, to: target, x0: g.start[0], y0: g.start[1], x1: end[0], y1: end[1] });
       }
     } else if (g.kind === "draw") {
       const [a, c] = [g.start, g.cur];
@@ -346,7 +435,8 @@ export function CanvasView({
         onCommand({ kind: "addShape", page, shape: g.shape, x, y, w: Math.abs(c[0] - a[0]), h: Math.abs(c[1] - a[1]) });
       } else {
         // A click drops a default-sized shape centred on the pointer.
-        onCommand({ kind: "addShape", page, shape: g.shape, x: a[0] - 0.75, y: a[1] - 0.5, w: 1.5, h: 1 });
+        const [w, h] = g.shape === "text" ? [1.5, 0.4] : [1.5, 1];
+        onCommand({ kind: "addShape", page, shape: g.shape, x: a[0] - w / 2, y: a[1] - h / 2, w, h });
       }
     } else if (g.kind === "marquee" && px(g.start, g.cur) > CLICK) {
       const [x0, x1] = [Math.min(g.start[0], g.cur[0]), Math.max(g.start[0], g.cur[0])];
@@ -365,12 +455,19 @@ export function CanvasView({
   return (
     <canvas
       ref={canvasRef}
-      className="drawing-canvas"
+      className={`drawing-canvas${dropping ? " dropping" : ""}`}
       tabIndex={0}
       aria-label={`Page ${dl.page.name}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
+      onPointerLeave={() => {
+        if (hotArrow.current || hover.current !== null) {
+          hotArrow.current = null;
+          if (!gesture.current) hover.current = null;
+          draw();
+        }
+      }}
       onPointerCancel={() => {
         gesture.current = null;
         draw();
@@ -381,6 +478,23 @@ export function CanvasView({
         const hit = tool === "select" ? hitShape(dl.shapes, toPage(v, H, local(e)), SLACK / v.zoom) : null;
         if (hit) onEditText(hit.id);
         else fit();
+      }}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes(SHAPE_MIME)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = "copy";
+        setDropping(true);
+      }}
+      onDragLeave={() => setDropping(false)}
+      onDrop={(e) => {
+        const id = e.dataTransfer.getData(SHAPE_MIME);
+        const v = view.current;
+        setDropping(false);
+        if (!id || !v) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onDropShape(id, toPage(v, H, local(e)));
       }}
     />
   );

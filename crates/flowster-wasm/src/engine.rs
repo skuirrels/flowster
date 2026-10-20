@@ -47,6 +47,49 @@ fn error(id: u32, message: impl Into<String>) -> Vec<EngineEvent> {
     vec![EngineEvent::Error { id: Some(id), message: message.into() }]
 }
 
+/// The shape library for the Shapes panel: each entry with an SVG path of its
+/// outline in a box of its default size (y down), rendered from the real shape.
+fn library_json() -> Value {
+    use flowster_core::geom::Seg;
+    use flowster_core::model::{Cell, Document as Model, Page, Sheet};
+    let entries: Vec<Value> = flowster_core::library::ENTRIES
+        .iter()
+        .map(|e| {
+            let shapes = flowster_core::library::build(e.id, 1, 0.0, 0.0, e.width, e.height).unwrap_or_default();
+            let mut sheet = Sheet::default();
+            sheet.cells.insert("PageWidth".into(), Cell::value(e.width.to_string()));
+            sheet.cells.insert("PageHeight".into(), Cell::value(e.height.to_string()));
+            let model = Model { pages: vec![Page { sheet, shapes, ..Default::default() }], ..Default::default() };
+            let mut d = String::new();
+            if let Some(dl) = flowster_render::build_page(&model, 0) {
+                for item in &dl.items {
+                    let flowster_render::Item::Path { d: segs, .. } = item else { continue };
+                    for s in segs {
+                        let p = |x: f64, y: f64| format!("{:.3} {:.3}", x, e.height - y);
+                        match *s {
+                            Seg::M { x, y } => d.push_str(&format!("M{} ", p(x, y))),
+                            Seg::L { x, y } => d.push_str(&format!("L{} ", p(x, y))),
+                            Seg::C { x1, y1, x2, y2, x, y } => {
+                                d.push_str(&format!("C{} {} {} ", p(x1, y1), p(x2, y2), p(x, y)));
+                            }
+                            Seg::Z => d.push_str("Z "),
+                        }
+                    }
+                }
+            }
+            json!({
+                "id": e.id,
+                "name": e.name,
+                "category": e.category,
+                "width": e.width,
+                "height": e.height,
+                "preview": d.trim_end(),
+            })
+        })
+        .collect();
+    Value::Array(entries)
+}
+
 fn format_of(file_name: &str) -> String {
     file_name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default()
 }
@@ -156,7 +199,11 @@ impl Engine {
     /// CRDT holds now. Returns the suggested file name and the bytes.
     pub fn save(&self, doc: &str) -> Result<(String, Vec<u8>), String> {
         let d = self.docs.get(doc).ok_or_else(|| format!("no document {doc}"))?;
-        let model = d.model.as_ref().ok_or("this file has no drawing to save")?;
+        let mut model = d.model.clone().ok_or("this file has no drawing to save")?;
+        for p in &mut model.pages {
+            p.connects = flowster_core::library::derive_connects(p);
+        }
+        let model = &model;
         let title = d.doc.meta().get("title").cloned().unwrap_or_else(|| "Drawing".into());
         let bytes = flowster_vsdx::writer::write_vsdx(model, d.doc.theme_xml(), &title)?;
         let stem = d.file_name.rsplit_once('.').map_or(d.file_name.as_str(), |(s, _)| s);
@@ -187,6 +234,7 @@ impl Engine {
                     Query::DerivedStateHash => {
                         serde_json::to_value(flowster_core::determinism::default_report()).unwrap_or(Value::Null)
                     }
+                    Query::Library => library_json(),
                     Query::Pages => match &d.model {
                         Some(m) => serde_json::to_value(flowster_render::pages(m)).unwrap_or(Value::Null),
                         None => json!([]),
@@ -288,11 +336,10 @@ mod tests {
 
     #[test]
     fn new_drawing_then_draw_and_undo() {
-        use flowster_core::command::ShapeKind;
         let mut e = Engine::new();
         let ev = e.handle(1, EngineRequest::New { title: None });
         let doc = reply(&ev)["doc"].as_str().unwrap().to_owned();
-        let add = Command::AddShape { page: 0, shape: ShapeKind::Rectangle, x: 1.0, y: 1.0, w: 2.0, h: 1.0 };
+        let add = Command::AddShape { page: 0, shape: "rectangle".into(), x: 1.0, y: 1.0, w: 2.0, h: 1.0 };
         let ev = e.handle(2, EngineRequest::Exec { doc: doc.clone(), cmd: add });
         assert_eq!(reply(&ev)["created"], serde_json::json!([0, 1]));
         let ev = e.handle(3, EngineRequest::Query { doc: doc.clone(), q: Query::PageDisplayList { page: 0 } });
@@ -305,11 +352,10 @@ mod tests {
 
     #[test]
     fn a_new_drawing_saves_as_a_vsdx_that_reads_back() {
-        use flowster_core::command::ShapeKind;
         let mut e = Engine::new();
         let ev = e.handle(1, EngineRequest::New { title: Some("Plan".into()) });
         let doc = reply(&ev)["doc"].as_str().unwrap().to_owned();
-        let add = Command::AddShape { page: 0, shape: ShapeKind::Ellipse, x: 1.0, y: 1.0, w: 2.0, h: 1.0 };
+        let add = Command::AddShape { page: 0, shape: "ellipse".into(), x: 1.0, y: 1.0, w: 2.0, h: 1.0 };
         e.handle(2, EngineRequest::Exec { doc: doc.clone(), cmd: add });
         let set = Command::SetText { page: 0, shape: 1, text: "Hi".into() };
         e.handle(3, EngineRequest::Exec { doc: doc.clone(), cmd: set });

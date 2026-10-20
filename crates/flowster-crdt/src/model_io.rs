@@ -139,7 +139,7 @@ pub(crate) fn section_key(s: &Section) -> String {
     }
 }
 
-fn write_row(m: &LoroMap, row: &Row, pos: usize) {
+pub(crate) fn write_row(m: &LoroMap, row: &Row, pos: usize) {
     m.insert("@pos", pos as i64).unwrap();
     if let Some(t) = &row.t {
         m.insert("@t", t.as_str()).unwrap();
@@ -328,7 +328,8 @@ pub(crate) fn tree(doc: &LoroDoc, key: &str) -> LoroTree {
 /// Writes one new top-level shape (no master, no styles) into a page tree,
 /// appended on top of the z-order.
 pub(crate) fn write_new_shape(doc: &LoroDoc, page_uuid: &str, shape: &Shape, uuid: &str) {
-    let w = Writer { doc, seed: 0 };
+    let seed = int(&doc.get_map(schema::META), "importSeed").unwrap_or(0) as u64;
+    let w = Writer { doc, seed };
     let id = uuid.to_owned();
     let t = tree(doc, &schema::shapes_tree_key(page_uuid));
     w.write_shapes(&t, None, std::slice::from_ref(shape), &move |_| id.clone(), &BTreeMap::new());
@@ -340,6 +341,8 @@ pub fn write_model(doc: &LoroDoc, model: &Model, theme_xml: Option<&[u8]>, seed:
     let w = Writer { doc, seed };
     let mut assets = Assets::default();
     let meta = doc.get_map(schema::META);
+    // New shapes refer to masters and styles through uuids made with this seed.
+    meta.insert("importSeed", seed as i64).unwrap();
 
     let media: BTreeMap<String, String> =
         model.media.iter().map(|(part, m)| (part.clone(), assets.put(&m.content_type, &m.bytes))).collect();

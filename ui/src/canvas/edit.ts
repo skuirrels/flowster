@@ -136,6 +136,41 @@ export interface Overlay {
   preview?: { kind: "polygon" | "ellipse" | "segment"; pts: Pt[] };
   /** Rubber-band rectangle, screen pixels. */
   marquee?: [number, number, number, number];
+  /** AutoConnect arrows: screen position and pointing direction. */
+  arrows?: Arrow[];
+  /** A shape about to be connected to (page polygon). */
+  target?: Pt[];
+}
+
+export type Direction = "up" | "down" | "left" | "right";
+
+export interface Arrow {
+  at: Pt;
+  dir: Direction;
+  hot: boolean;
+}
+
+/** Distance of the AutoConnect arrows outside a shape, CSS pixels. */
+const ARROW_GAP = 20;
+
+/** Where the AutoConnect arrows of a shape go (screen pixels). */
+export function arrowsFor(b: ShapeBox, view: View, pageHeight: number, hot: Direction | null): Arrow[] {
+  const [x0, y0, x1, y1] = pageBounds(b);
+  const [l, t] = toScreen(view, pageHeight, [x0, y1]);
+  const [r, bt] = toScreen(view, pageHeight, [x1, y0]);
+  const [cx, cy] = [(l + r) / 2, (t + bt) / 2];
+  const at: [Direction, Pt][] = [
+    ["up", [cx, t - ARROW_GAP]],
+    ["down", [cx, bt + ARROW_GAP]],
+    ["left", [l - ARROW_GAP, cy]],
+    ["right", [r + ARROW_GAP, cy]],
+  ];
+  return at.map(([dir, p]) => ({ at: p, dir, hot: dir === hot }));
+}
+
+/** The arrow under a screen point, if any. */
+export function hitArrow(arrows: Arrow[], [x, y]: Pt): Direction | null {
+  return arrows.find((a) => Math.hypot(a.at[0] - x, a.at[1] - y) <= 10)?.dir ?? null;
 }
 
 /** Selection colour: the brand accent, readable on light and dark pages. */
@@ -178,6 +213,32 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, view: View, dpr: numb
     ctx.strokeStyle = ACCENT;
     ctx.stroke();
     ctx.setLineDash([]);
+  }
+  if (o.target) {
+    ctx.beginPath();
+    o.target.forEach((p, i) => (i === 0 ? ctx.moveTo(...s(p)) : ctx.lineTo(...s(p))));
+    ctx.closePath();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = ACCENT;
+    ctx.stroke();
+    ctx.fillStyle = "rgba(13, 138, 122, 0.07)";
+    ctx.fill();
+    ctx.lineWidth = 1;
+  }
+  for (const a of o.arrows ?? []) {
+    const [x, y] = a.at;
+    const rot = { up: -Math.PI / 2, down: Math.PI / 2, left: Math.PI, right: 0 }[a.dir];
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    ctx.beginPath();
+    ctx.moveTo(7, 0);
+    ctx.lineTo(-5, -6.5);
+    ctx.lineTo(-5, 6.5);
+    ctx.closePath();
+    ctx.fillStyle = a.hot ? ACCENT : "rgba(13, 138, 122, 0.45)";
+    ctx.fill();
+    ctx.restore();
   }
   if (o.marquee) {
     const [x0, y0, x1, y1] = o.marquee;

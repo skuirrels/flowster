@@ -312,8 +312,16 @@ pub fn write_vsdx(doc: &Document, theme_xml: Option<&[u8]>, title: &str) -> Resu
                 content.push_str("<Connect");
                 attr_u32(&mut content, "FromSheet", Some(c.from_sheet));
                 attr(&mut content, "FromCell", c.from_cell.as_deref());
+                // Visio's part codes: 9 begin, 12 end; 3 the whole shape (dynamic glue).
+                let from_part = match c.from_cell.as_deref() {
+                    Some("BeginX") => Some(9),
+                    Some("EndX") => Some(12),
+                    _ => None,
+                };
+                attr_u32(&mut content, "FromPart", from_part);
                 attr_u32(&mut content, "ToSheet", Some(c.to_sheet));
                 attr(&mut content, "ToCell", c.to_cell.as_deref());
+                attr_u32(&mut content, "ToPart", (c.to_cell.as_deref() == Some("PinX")).then_some(3));
                 content.push_str("/>");
             }
             content.push_str("</Connects>");

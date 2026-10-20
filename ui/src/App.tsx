@@ -1,13 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 
 import { CanvasView, PX_PER_INCH, type CanvasHandle, type Tool } from "./canvas/CanvasView";
+import { FormatBar } from "./chrome/FormatBar";
 import { Icon, shortcut, type IconName } from "./chrome/icons";
 import { Inspector } from "./chrome/Inspector";
 import { MenuBar, type Menu } from "./chrome/MenuBar";
 import { PackageView } from "./chrome/PackageView";
+import { ShapesPanel } from "./chrome/ShapesPanel";
 import { AboutDialog, ShortcutsDialog, Welcome } from "./chrome/Welcome";
 import type { EngineClient } from "./engine/client";
-import type { Command, DisplayList, DocInfo, OpenResult, PackageInfo, PageInfo, SyncState } from "./engine/protocol";
+import type {
+  CellEdit,
+  ChangeSummary,
+  Command,
+  DisplayList,
+  DocInfo,
+  LibraryEntry,
+  OpenResult,
+  PackageInfo,
+  PageInfo,
+  SyncState,
+} from "./engine/protocol";
 import { inTauri, pickDocument, saveDocument, type PickedFile } from "./host";
 
 interface OpenDoc {
@@ -30,6 +43,8 @@ const ZOOM_STEPS = [0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8];
 /** Drawing tools, with Visio's shortcuts. */
 const TOOLS: { tool: Tool; label: string; key: string; icon: IconName }[] = [
   { tool: "select", label: "Pointer", key: "1", icon: "pointer" },
+  { tool: "text", label: "Text", key: "2", icon: "text" },
+  { tool: "connector", label: "Connector", key: "3", icon: "connector" },
   { tool: "rectangle", label: "Rectangle", key: "8", icon: "rectangle" },
   { tool: "ellipse", label: "Ellipse", key: "9", icon: "ellipse" },
   { tool: "line", label: "Line", key: "6", icon: "line" },
@@ -90,6 +105,10 @@ export function App({ engine }: { engine: EngineClient }) {
   const [savedAs, setSavedAs] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [inspector, setInspector] = useState(true);
+  const [shapesPanel, setShapesPanel] = useState(true);
+  const [library, setLibrary] = useState<LibraryEntry[]>([]);
+  /** A shape to start editing as soon as it appears (a new text box). */
+  const [pendingEdit, setPendingEdit] = useState<number | null>(null);
   const [dialog, setDialog] = useState<"shortcuts" | "about" | null>(null);
   /** Bumped after every change so the page is fetched again. */
   const [version, setVersion] = useState(0);
@@ -124,6 +143,15 @@ export function App({ engine }: { engine: EngineClient }) {
       cancelled = true;
     };
   }, [doc, page, engine, version]);
+
+  // The shape library, once a document is open.
+  useEffect(() => {
+    if (!doc || library.length > 0) return;
+    engine
+      .query(doc.open.doc, { kind: "library" })
+      .then(setLibrary)
+      .catch(() => {});
+  }, [doc, engine, library.length]);
 
   const refreshInfo = useCallback(
     async (docId: string) => {
@@ -203,19 +231,63 @@ export function App({ engine }: { engine: EngineClient }) {
   );
 
   const exec = useCallback(
-    async (cmd: Command) => {
-      if (!doc) return;
+    async (cmd: Command): Promise<ChangeSummary | null> => {
+      if (!doc) return null;
       try {
         const changes = await engine.exec(doc.open.doc, cmd);
         setVersion((v) => v + 1);
         setDirty(true);
         if (changes?.created) setSelection([changes.created[1]]);
         await refreshInfo(doc.open.doc);
+        return changes;
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
+        return null;
       }
     },
     [doc, engine, refreshInfo],
+  );
+
+  /** Runs a canvas command; a new text box opens for typing straight away. */
+  const onCanvasCommand = useCallback(
+    async (c: Command) => {
+      // Back to the pointer as soon as a shape is drawn (not when the engine
+      // replies, which could undo a tool picked meanwhile).
+      if (c.kind === "addShape" || c.kind === "addConnector") setTool("select");
+      const changes = await exec(c);
+      if (c.kind === "addShape" && c.shape === "text" && changes?.created) setPendingEdit(changes.created[1]);
+    },
+    [exec],
+  );
+
+  const applyFormat = useCallback(
+    (cells: CellEdit[]) => {
+      if (selection.length > 0) void exec({ kind: "setCells", page, shapes: selection, cells });
+    },
+    [exec, page, selection],
+  );
+
+  /** Adds a library shape centred on a page point (the view centre by default). */
+  const addFromLibrary = useCallback(
+    (entry: LibraryEntry, at?: [number, number]) => {
+      const c = at ?? canvas.current?.viewCentre() ?? [dl ? dl.page.width / 2 : 4, dl ? dl.page.height / 2 : 4];
+      let [x, y] = [c[0] - entry.width / 2, c[1] - entry.height / 2];
+      // A clicked tile lands in view and, where it fits, on the page.
+      if (!at && dl) {
+        x = Math.max(0, Math.min(x, dl.page.width - entry.width));
+        y = Math.max(0, Math.min(y, dl.page.height - entry.height));
+      }
+      void onCanvasCommand({
+        kind: "addShape",
+        page,
+        shape: entry.id,
+        x,
+        y,
+        w: entry.width,
+        h: entry.height,
+      });
+    },
+    [dl, onCanvasCommand, page],
   );
 
   const onSave = useCallback(async () => {
@@ -262,6 +334,16 @@ export function App({ engine }: { engine: EngineClient }) {
     setEditing(null);
   }, [dl, editing, exec, page]);
 
+  // Open the editor on a new text box once it is on screen.
+  useEffect(() => {
+    if (pendingEdit !== null && dl?.shapes.some((b) => b.id === pendingEdit)) {
+      editText(pendingEdit);
+      setPendingEdit(null);
+    }
+  }, [dl, editText, pendingEdit]);
+
+  const selectedFormat = dl?.shapes.find((b) => b.id === selection[0])?.format ?? null;
+
   const stepZoom = useCallback(
     (dir: 1 | -1) => {
       const pct = zoom / PX_PER_INCH;
@@ -291,6 +373,12 @@ export function App({ engine }: { engine: EngineClient }) {
       } else if (toolKey && drawing && !inInput) {
         e.preventDefault();
         setTool(toolKey.tool);
+      } else if (mod && (key === "b" || key === "i" || key === "u") && drawing && !inInput && selectedFormat) {
+        e.preventDefault();
+        const k = key === "b" ? "bold" : key === "i" ? "italic" : "underline";
+        const f = selectedFormat;
+        const bits = ((k === "bold" ? !f.bold : f.bold) ? 1 : 0) | ((k === "italic" ? !f.italic : f.italic) ? 2 : 0) | ((k === "underline" ? !f.underline : f.underline) ? 4 : 0);
+        applyFormat([{ section: "Character", cell: "Style", value: String(bits) }]);
       } else if (mod && key === "a" && drawing && !inInput) {
         e.preventDefault();
         selectAll();
@@ -327,7 +415,7 @@ export function App({ engine }: { engine: EngineClient }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [doc, drawing, exec, onOpen, onNew, onSave, stepZoom, deleteSelection, selectAll, editText, selection]);
+  }, [doc, drawing, exec, onOpen, onNew, onSave, stepZoom, deleteSelection, selectAll, editText, selection, selectedFormat, applyFormat]);
 
   const menus: Menu[] = useMemo(
     () => [
@@ -364,6 +452,7 @@ export function App({ engine }: { engine: EngineClient }) {
           { label: "Zoom out", icon: "zoomOut", keys: "Ctrl+-", run: () => stepZoom(-1), disabled: !drawing },
           { label: "Fit page", icon: "fit", keys: "Ctrl+Shift+W", run: () => canvas.current?.fit(), disabled: !drawing },
           "separator",
+          { label: "Shapes panel", checked: shapesPanel, run: () => setShapesPanel((v) => !v), disabled: !doc },
           { label: "Inspector", checked: inspector, run: () => setInspector((v) => !v), disabled: !doc },
           "separator",
           { label: "Drawing", checked: mode === "drawing", run: () => setMode("drawing"), disabled: !doc },
@@ -391,7 +480,7 @@ export function App({ engine }: { engine: EngineClient }) {
         ],
       },
     ],
-    [busy, deleteSelection, doc, drawing, editText, exec, inspector, mode, onNew, onOpen, onSave, selectAll, selection, stepZoom, undo],
+    [busy, deleteSelection, doc, drawing, editText, exec, inspector, shapesPanel, mode, onNew, onOpen, onSave, selectAll, selection, stepZoom, undo],
   );
 
   const title = doc?.info.meta.title || doc?.info.fileName.replace(/\.[^.]+$/, "") || "";
@@ -425,6 +514,12 @@ export function App({ engine }: { engine: EngineClient }) {
           )}
         </div>
         <div className="titlebar-end">
+          {doc && mode === "drawing" && (
+            <div className="panel-toggles">
+              <ToolButton icon="shapes" label="Shapes panel" onClick={() => setShapesPanel((v) => !v)} pressed={shapesPanel} />
+              <ToolButton icon="panel" label="Inspector" onClick={() => setInspector((v) => !v)} pressed={inspector} />
+            </div>
+          )}
           {doc && (
             <div className="seg" role="tablist" aria-label="View">
               <button type="button" role="tab" aria-selected={mode === "drawing"} onClick={() => setMode("drawing")}>
@@ -469,22 +564,7 @@ export function App({ engine }: { engine: EngineClient }) {
                   />
                 ))}
               </div>
-              <div className="tb-group">
-                <ToolButton icon="text" label="Edit text" keys="F2" onClick={() => editText(selection[0])} disabled={selection.length !== 1} />
-                <ToolButton icon="trash" label="Delete" keys="Del" onClick={deleteSelection} disabled={selection.length === 0} />
-              </div>
-              <div className="tb-spacer" />
-              <div className="tb-group zoom">
-                <ToolButton icon="zoomOut" label="Zoom out" keys="Ctrl+-" onClick={() => stepZoom(-1)} />
-                <button type="button" className="zoom-pct" data-tip="Fit page  Ctrl+Shift+W" onClick={() => canvas.current?.fit()}>
-                  {Math.round((zoom / PX_PER_INCH) * 100)}%
-                </button>
-                <ToolButton icon="zoomIn" label="Zoom in" keys="Ctrl++" onClick={() => stepZoom(1)} />
-                <ToolButton icon="fit" label="Fit page" keys="Ctrl+Shift+W" onClick={() => canvas.current?.fit()} />
-              </div>
-              <div className="tb-group">
-                <ToolButton icon="panel" label="Inspector" onClick={() => setInspector((v) => !v)} pressed={inspector} />
-              </div>
+              {selectedFormat && <FormatBar format={selectedFormat} apply={applyFormat} />}
             </>
           )}
         </div>
@@ -504,6 +584,7 @@ export function App({ engine }: { engine: EngineClient }) {
         {doc && mode === "package" && <PackageView open={doc.open} pkg={doc.pkg} info={doc.info} />}
         {doc && mode === "drawing" && (
           <div className="stage">
+            {shapesPanel && library.length > 0 && <ShapesPanel library={library} onAdd={(e) => addFromLibrary(e)} />}
             <div className="canvas-wrap">
               {dl ? (
                 <CanvasView
@@ -512,13 +593,12 @@ export function App({ engine }: { engine: EngineClient }) {
                   tool={tool}
                   selection={selection}
                   onSelection={setSelection}
-                  onCommand={(c) => {
-                    // Back to the pointer as soon as a shape is drawn (not when the
-                    // engine replies, which could undo a tool picked meanwhile).
-                    if (c.kind === "addShape") setTool("select");
-                    void exec(c);
-                  }}
+                  onCommand={(c) => void onCanvasCommand(c)}
                   onEditText={editText}
+                  onDropShape={(id, at) => {
+                    const entry = library.find((e) => e.id === id);
+                    if (entry) addFromLibrary(entry, at);
+                  }}
                   onZoomChange={setZoom}
                 />
               ) : (
@@ -548,7 +628,12 @@ export function App({ engine }: { engine: EngineClient }) {
               )}
               {tool !== "select" && (
                 <div className="tool-hint">
-                  Drag to draw a {TOOLS.find((t) => t.tool === tool)?.label.toLowerCase()} · <kbd>Esc</kbd> to cancel
+                  {tool === "connector"
+                    ? "Drag from one shape to another to connect them"
+                    : tool === "text"
+                      ? "Click to add text, or drag a text box"
+                      : `Drag to draw a ${TOOLS.find((t) => t.tool === tool)?.label.toLowerCase()}`}{" "}
+                  · <kbd>Esc</kbd> to cancel
                 </div>
               )}
             </div>
@@ -604,6 +689,30 @@ export function App({ engine }: { engine: EngineClient }) {
               {inTauri ? "Desktop" : "Browser"}
               {hash ? ` · ${hash.slice(0, 8)}` : ""}
             </span>
+            {mode === "drawing" && dl && (
+              <div className="zoom-ctl">
+                <button type="button" className="icon-btn" aria-label="Zoom out" onClick={() => stepZoom(-1)}>
+                  <Icon name="zoomOut" size={15} />
+                </button>
+                <input
+                  type="range"
+                  aria-label="Zoom"
+                  min={10}
+                  max={400}
+                  value={Math.round((zoom / PX_PER_INCH) * 100)}
+                  onChange={(e) => canvas.current?.setZoom((Number(e.target.value) / 100) * PX_PER_INCH)}
+                />
+                <button type="button" className="icon-btn" aria-label="Zoom in" onClick={() => stepZoom(1)}>
+                  <Icon name="zoomIn" size={15} />
+                </button>
+                <button type="button" className="zoom-pct" onClick={() => canvas.current?.fit()} title="Fit page (Ctrl+Shift+W)">
+                  {Math.round((zoom / PX_PER_INCH) * 100)}%
+                </button>
+                <button type="button" className="icon-btn" aria-label="Fit page" onClick={() => canvas.current?.fit()}>
+                  <Icon name="fit" size={15} />
+                </button>
+              </div>
+            )}
           </div>
         </footer>
       )}
