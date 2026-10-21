@@ -1,6 +1,6 @@
 // The start screen and the Help dialogs.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { Icon, shortcut } from "./icons";
 
@@ -126,6 +126,13 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
 }
 
 export function AboutDialog({ onClose }: { onClose: () => void }) {
+  const [notices, setNotices] = useState<string | null>(null);
+  // scripts/third-party-notices.mjs writes the file next to the built UI (not in dev builds, where
+  // the dev server answers with index.html instead).
+  const showNotices = () =>
+    void fetch("/third-party-notices.txt")
+      .then((r) => (r.ok && r.headers.get("content-type")?.startsWith("text/plain") ? r.text() : Promise.reject()))
+      .then(setNotices, () => setNotices("The licence notices are added to release builds."));
   return (
     <Dialog title="About Flowster" onClose={onClose}>
       <div className="about">
@@ -137,6 +144,13 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
         </p>
         <p className="muted">Version {__APP_VERSION__}</p>
         <p className="muted">Drawings are kept in a collaborative document model, so every change can be undone.</p>
+        {notices === null ? (
+          <button type="button" className="btn small" onClick={showNotices}>
+            Third-party licences
+          </button>
+        ) : (
+          <pre className="notices">{notices}</pre>
+        )}
       </div>
     </Dialog>
   );
