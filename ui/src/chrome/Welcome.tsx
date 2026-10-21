@@ -135,6 +135,7 @@ export function AboutDialog({ onClose }: { onClose: () => void }) {
         <p>
           <strong>Flowster</strong> is an open diagramming editor that reads and writes Visio .vsdx files.
         </p>
+        <p className="muted">Version {__APP_VERSION__}</p>
         <p className="muted">Drawings are kept in a collaborative document model, so every change can be undone.</p>
       </div>
     </Dialog>

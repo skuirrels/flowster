@@ -32,6 +32,7 @@ import { ExportDialog, RecoveryNotice, UnsavedDialog, type ExportChoice } from "
 import { pageImage, pagePng } from "./canvas/pageImage";
 import {
   canExportPdf,
+  checkForUpdates,
   exportFile,
   exportPdf,
   inTauri,
@@ -947,6 +948,9 @@ export function App({ engine }: { engine: EngineClient }) {
         items: [
           { label: "Command palette", icon: "command", keys: "Ctrl+K", run: () => setPalette({ kind: "commands" }), disabled: !doc },
           { label: "Keyboard shortcuts", icon: "keyboard", run: () => setDialog("shortcuts") },
+          ...(inTauri
+            ? [{ label: "Check for updates…", icon: "export" as const, run: () => void checkForUpdates().catch(() => {}) }]
+            : []),
           { label: "About Flowster", icon: "info", run: () => setDialog("about") },
         ],
       },

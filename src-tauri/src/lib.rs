@@ -260,23 +260,88 @@ async fn read_picked_document(token: u64, picked: State<'_, PickedFiles>) -> Res
     Ok(Response::new(bytes))
 }
 
-/// Offers a newer signed release, if the feed has one. Failures (offline, no feed
-/// yet) are silent: the next start-up tries again.
-async fn check_for_update(app: AppHandle) {
-    let Ok(updater) = app.updater() else { return };
-    let Ok(Some(update)) = updater.check().await else { return };
-    let ask = app
-        .dialog()
-        .message(format!(
-            "Flowster {} is available (you have {}). Install it now? Flowster restarts when it's done.",
-            update.version, update.current_version
-        ))
-        .title("Update available")
-        .buttons(MessageDialogButtons::OkCancelCustom("Install and restart".into(), "Later".into()));
-    let Ok(install) = tauri::async_runtime::spawn_blocking(move || ask.blocking_show()).await else { return };
-    if install && update.download_and_install(|_, _| {}, || {}).await.is_ok() {
-        app.restart();
+/// Shows a message and waits for OK (or a choice between two labels; true for the first).
+async fn ask(app: &AppHandle, title: &str, text: String, buttons: Option<(&str, &str)>) -> bool {
+    let mut dialog = app.dialog().message(text).title(title);
+    if let Some((yes, no)) = buttons {
+        dialog = dialog.buttons(MessageDialogButtons::OkCancelCustom(yes.into(), no.into()));
     }
+    tauri::async_runtime::spawn_blocking(move || dialog.blocking_show()).await.unwrap_or(false)
+}
+
+static CHECKING: AtomicBool = AtomicBool::new(false);
+
+/// Offers a newer signed release, if the feed has one. The start-up check is
+/// quiet unless there is an update (offline or no feed yet: the next start-up
+/// tries again); Help > Check for Updates (`interactive`) also says "up to
+/// date" and reports errors.
+async fn check_for_update(app: AppHandle, interactive: bool) {
+    if CHECKING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let result = offer_update(&app, interactive).await;
+    CHECKING.store(false, Ordering::SeqCst);
+    if let Err(e) = result
+        && interactive
+    {
+        ask(&app, "Check for Updates", format!("Couldn't check for updates: {e}"), None).await;
+    }
+}
+
+async fn offer_update(app: &AppHandle, interactive: bool) -> Result<(), String> {
+    let version = app.package_info().version.to_string();
+    let up_to_date = |platform: &str| format!("You're up to date: Flowster {version} is the latest version{platform}.");
+    if cfg!(debug_assertions) {
+        if interactive {
+            ask(
+                app,
+                "Check for Updates",
+                "Development builds don't update themselves. Install Flowster to get updates.".into(),
+                None,
+            )
+            .await;
+        }
+        return Ok(());
+    }
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let update = match updater.check().await {
+        Ok(Some(update)) => update,
+        Ok(None) => {
+            if interactive {
+                ask(app, "Check for Updates", up_to_date(""), None).await;
+            }
+            return Ok(());
+        }
+        // Each platform is built and published on its own: a newer version that
+        // isn't out for this one yet means this computer is up to date.
+        Err(e) if e.to_string().contains("platform") && e.to_string().contains("not found") => {
+            if interactive {
+                ask(app, "Check for Updates", up_to_date(" for this computer"), None).await;
+            }
+            return Ok(());
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    let unsaved = if app.state::<DocumentState>().dirty.load(Ordering::Relaxed) {
+        "\n\nYour drawing has unsaved changes: save it first, as Flowster closes to install."
+    } else {
+        ""
+    };
+    let text = format!(
+        "Flowster {} is available (you have {}). Install it now? Flowster restarts when it's done.{unsaved}",
+        update.version, update.current_version
+    );
+    if !ask(app, "Update available", text, Some(("Install and restart", "Later"))).await {
+        return Ok(());
+    }
+    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    app.restart();
+}
+
+/// Help > Check for Updates.
+#[tauri::command]
+fn check_for_updates(app: AppHandle) {
+    tauri::async_runtime::spawn(check_for_update(app, true));
 }
 
 pub fn run() {
@@ -287,7 +352,7 @@ pub fn run() {
             app.manage(PickedFiles::default());
             app.manage(DocumentState::default());
             if !cfg!(debug_assertions) {
-                tauri::async_runtime::spawn(check_for_update(app.handle().clone()));
+                tauri::async_runtime::spawn(check_for_update(app.handle().clone(), false));
             }
             Ok(())
         })
@@ -322,7 +387,8 @@ pub fn run() {
             read_picked_document,
             save_document,
             export_pdf,
-            set_document_state
+            set_document_state,
+            check_for_updates
         ])
         .run(tauri::generate_context!())
         .expect("error while running Flowster");
