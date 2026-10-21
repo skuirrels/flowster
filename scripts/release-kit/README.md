@@ -21,6 +21,7 @@ Each `make release` publishes its platforms to the app's download site (GitHub P
    git commit -am "Version 1.2.3" && git push
    ```
    You can also add release notes in `release-notes/<version>.md` before committing. They appear on the download page and in the update dialog.
+   Add the version's entry to `CHANGELOG.md` too, if the app keeps one (next to `package.json`: `# <App> change log`, then a `## 1.2.3 · 18 October 2026` heading and bullets per version, newest first). The download page, the releases repo and its GitHub release show the whole log.
 2. On the Windows PC:
    ```bash
    git pull && make release
@@ -63,7 +64,7 @@ The safeguards:
 - **Installers under stable names**, e.g. `Tessera-Windows-Setup.exe`, `Tessera-macOS-AppleSilicon.dmg`, `Tessera-Linux-x86_64.AppImage`. Links to them never change.
 - **Per-platform update feeds** at `updates/<os>-<arch>.json`. Installed copies read these first (`updates/{{target}}-{{arch}}.json` in `plugins.updater.endpoints`).
 - **A combined feed** (`latest.json` or `update.json`) for copies installed before the per-platform feeds. It holds one version, never moves backwards, and lists the platforms published for that version.
-- **Everything else:** `index.html` (the download page), `SHA256SUMS.txt`, `files.json` (each file's version), `release.json`, a `README.md` with download badges, and a workflow. On each publish, that workflow makes the releases repo's latest GitHub release hold the same files. The repo is public, so it costs no minutes.
+- **Everything else:** `index.html` (the download page), `SHA256SUMS.txt`, `files.json` (each file's version), `release.json`, a `README.md` with download badges, a `CHANGELOG.md` when the app has one, and a workflow. On each publish, that workflow makes the releases repo's latest GitHub release hold the same files. The repo is public, so it costs no minutes.
 
 Downloads not yet rebuilt for the newest version stay on the page, labelled with their version.
 GitHub refuses files over 100 MB in a push, so a file that size is left out with a warning.
@@ -88,7 +89,9 @@ That asks you to create a user. Then, in one of the app repos:
 ```bash
 make linux-setup
 ```
-This installs the Tauri build packages, Rust and Node in that distro. The Linux build works in
+This installs the Tauri build packages, Rust and Node in that distro, and pnpm (through Corepack)
+for apps that use it. WSL also sees the Windows `PATH`, so a Windows pnpm there doesn't count: if
+a pnpm app's Linux build says WSL has no Linux pnpm, run `make linux-setup` again. The Linux build works in
 its own clone, `~/release-builds/<app>` inside WSL. It is checked out at the Windows checkout's
 commit, has its own `node_modules` and `target/`, and stays incremental between releases. The
 signing key is read from the Windows `~/.tauri`.

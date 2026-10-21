@@ -25,8 +25,12 @@ if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split("."
   curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
   sudo apt-get install -y nodejs
 fi
-# pnpm, for apps that use it (the version in their package.json "packageManager").
-command -v pnpm >/dev/null || sudo corepack enable
+# pnpm, for apps that use it (the version in their package.json "packageManager"). WSL also sees the
+# Windows PATH, so a pnpm under /mnt/ is the Windows one, which can't build here: it doesn't count.
+# Corepack's shim goes in node's bin folder, which comes before the Windows paths.
+case "$(command -v pnpm || true)" in
+  "" | /mnt/*) sudo corepack enable ;;
+esac
 
 # The build clones the Windows checkout (/mnt/c/…), whose files belong to another user as far as
 # git is concerned.
