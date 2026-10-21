@@ -6,6 +6,8 @@ fn main() {
         "pick_document",
         "read_picked_document",
         "save_document",
+        "export_pdf",
+        "set_document_state",
     ])))
     .expect("tauri build script");
 }

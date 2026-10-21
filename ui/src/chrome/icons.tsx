@@ -80,7 +80,9 @@ export type IconName =
   | "magnet"
   | "guides"
   | "map"
-  | "focus";
+  | "focus"
+  | "export"
+  | "print";
 
 const paths: Record<IconName, ReactNode> = {
   logo: (
@@ -477,6 +479,19 @@ const paths: Record<IconName, ReactNode> = {
     <>
       <path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />
       <rect x="9" y="9" width="6" height="6" rx="1" />
+    </>
+  ),
+  export: (
+    <>
+      <path d="M12 15V3.5M7.5 8 12 3.5 16.5 8" />
+      <path d="M5 13v5.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V13" />
+    </>
+  ),
+  print: (
+    <>
+      <path d="M7 8V3.5h10V8" />
+      <rect x="3.5" y="8" width="17" height="8" rx="1.5" />
+      <path d="M7 13.5h10V20.5H7z" />
     </>
   ),
 };
