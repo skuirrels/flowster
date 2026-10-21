@@ -110,6 +110,12 @@ export async function exportPdf(fileName: string, vsdx: ArrayBuffer, pages: numb
   });
 }
 
+/** Help > Check for Updates: the host checks the signed update feed and asks in its own dialogs. */
+export async function checkForUpdates(): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("check_for_updates");
+}
+
 /** Tells the host whether there are unsaved changes, so closing the window can warn. */
 export async function setDocumentState(dirty: boolean, title: string): Promise<void> {
   if (!inTauri) return;

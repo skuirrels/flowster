@@ -8,6 +8,7 @@ fn main() {
         "save_document",
         "export_pdf",
         "set_document_state",
+        "check_for_updates",
     ])))
     .expect("tauri build script");
 }
