@@ -34,16 +34,28 @@ function toPath(d: Seg[]): Path2D {
 }
 
 const images = new Map<string, HTMLImageElement>();
-function image(mime: string, data: string, onLoad: () => void): HTMLImageElement | null {
+function imageElement(mime: string, data: string, onLoad?: () => void): HTMLImageElement {
   const key = `${mime}:${data.length}:${data.slice(0, 64)}:${data.slice(-64)}`;
   let img = images.get(key);
   if (!img) {
     img = new Image();
-    img.onload = onLoad;
+    if (onLoad) img.onload = onLoad;
     img.src = `data:${mime};base64,${data}`;
     images.set(key, img);
   }
+  return img;
+}
+
+function image(mime: string, data: string, onLoad: () => void): HTMLImageElement | null {
+  const img = imageElement(mime, data, onLoad);
   return img.complete && img.naturalWidth > 0 ? img : null;
+}
+
+/** Resolves once the page's pictures are decoded (or failed), so an export draws them. */
+export async function preloadImages(dl: DisplayList): Promise<void> {
+  await Promise.all(
+    dl.items.map((it) => (it.kind === "image" && it.data ? imageElement(it.mime, it.data).decode().catch(() => {}) : null)),
+  );
 }
 
 /** The view that fits the page in the canvas, less `inset` CSS pixels along the top and left (the rulers). */

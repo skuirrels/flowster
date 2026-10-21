@@ -4,9 +4,21 @@ import { useEffect } from "react";
 
 import { Icon, shortcut } from "./icons";
 
-export function Welcome({ onNew, onOpen, busy }: { onNew: () => void; onOpen: () => void; busy: boolean }) {
+export function Welcome({
+  onNew,
+  onOpen,
+  busy,
+  notice,
+}: {
+  onNew: () => void;
+  onOpen: () => void;
+  busy: boolean;
+  /** Shown above the card (a recoverable drawing). */
+  notice?: React.ReactNode;
+}) {
   return (
     <div className="welcome">
+      {notice}
       <div className="welcome-card">
         <div className="welcome-mark">
           <Icon name="logo" size={34} />

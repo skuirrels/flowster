@@ -28,7 +28,20 @@ import type {
   ShapeFormat,
   SyncState,
 } from "./engine/protocol";
-import { inTauri, pickDocument, saveDocument, type PickedFile } from "./host";
+import { ExportDialog, RecoveryNotice, UnsavedDialog, type ExportChoice } from "./chrome/FileDialogs";
+import { pageImage, pagePng } from "./canvas/pageImage";
+import {
+  canExportPdf,
+  exportFile,
+  exportPdf,
+  inTauri,
+  pickDocument,
+  saveDocument,
+  setDocumentState,
+  type PickedFile,
+  type SaveHandle,
+} from "./host";
+import { clearRecoveryCopy, keepRecoveryCopy, recoveryCopy, type RecoveryCopy } from "./recovery";
 
 interface OpenDoc {
   open: OpenResult;
@@ -132,6 +145,17 @@ export function App({ engine }: { engine: EngineClient }) {
   const [editing, setEditing] = useState<TextEdit | null>(null);
   const [savedAs, setSavedAs] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  /** Where File > Save writes without asking (the .vsdx the drawing came from or was last saved to). */
+  const [saveHandle, setSaveHandle] = useState<SaveHandle | undefined>(undefined);
+  /** The unsaved-changes question, while it is open: how to answer the caller. */
+  const [unsaved, setUnsaved] = useState<((proceed: boolean) => void) | null>(null);
+  /** A drawing lost to a crash, found at start-up. */
+  const [recovery, setRecovery] = useState<RecoveryCopy | null>(null);
+  const [exporting, setExporting] = useState(false);
+  /** Pages laid out for printing (image URL and size in inches) while the print dialog is up. */
+  const [printPages, setPrintPages] = useState<{ url: string; width: number; height: number }[] | null>(null);
+  /** A short confirmation ("Exported Plan.pdf"), cleared after a few seconds. */
+  const [notice, setNotice] = useState<string | null>(null);
   const [inspector, setInspector] = useState(true);
   const [shapesPanel, setShapesPanel] = useState(true);
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
@@ -217,9 +241,9 @@ export function App({ engine }: { engine: EngineClient }) {
     [engine],
   );
 
-  /** Shows a document the engine has just opened or created. */
+  /** Shows a document the engine has just opened or created (`handle`: where Save writes it back). */
   const showDoc = useCallback(
-    async (open: OpenResult) => {
+    async (open: OpenResult, handle?: SaveHandle) => {
       const [pkg, info, pages, derived] = await Promise.all([
         engine.query(open.doc, { kind: "packageParts" }),
         engine.query(open.doc, { kind: "docInfo" }),
@@ -233,6 +257,7 @@ export function App({ engine }: { engine: EngineClient }) {
       setTool("select");
       setDirty(false);
       setSavedAs(null);
+      setSaveHandle(handle);
       setDoc({ open, pkg, info, pages });
       setMode(pages.length > 0 ? "drawing" : "package");
       setHash(derived.hash);
@@ -240,23 +265,65 @@ export function App({ engine }: { engine: EngineClient }) {
     [engine],
   );
 
+  /** The drawing's file name as last opened or saved. */
+  const fileName = savedAs ?? doc?.info.fileName ?? "Drawing.vsdx";
+  const stem = fileName.replace(/\.[^.]+$/, "");
+  /** Edits since the last save started, so a save that finishes after more edits stays dirty. */
+  const versionRef = useRef(version);
+  versionRef.current = version;
+
+  /** Saves to the drawing's own file (or asks where, the first time, or with `asNew`). True once saved. */
+  const saveTo = useCallback(
+    async (asNew: boolean): Promise<boolean> => {
+      if (!doc) return false;
+      setError(null);
+      try {
+        const at = versionRef.current;
+        const bytes = await engine.save(doc.open.doc);
+        const saved = await saveDocument(`${stem}.vsdx`, bytes, asNew ? undefined : saveHandle);
+        if (!saved) return false;
+        setSavedAs(saved.fileName);
+        setSaveHandle(saved.handle);
+        if (versionRef.current === at) {
+          setDirty(false);
+          void clearRecoveryCopy();
+        }
+        return true;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        return false;
+      }
+    },
+    [doc, engine, saveHandle, stem],
+  );
+  const onSave = useCallback(() => saveTo(false), [saveTo]);
+  const onSaveAs = useCallback(() => saveTo(true), [saveTo]);
+
+  /** Before the drawing is replaced: true to go ahead (saved, or the changes discarded). */
+  const confirmUnsaved = useCallback(
+    (): Promise<boolean> => (dirty ? new Promise((resolve) => setUnsaved(() => resolve)) : Promise.resolve(true)),
+    [dirty],
+  );
+
   const onNew = useCallback(async () => {
     setError(null);
     try {
+      if (!(await confirmUnsaved())) return;
       if (doc) await engine.close(doc.open.doc);
       await showDoc(await engine.newDrawing());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [doc, engine, showDoc]);
+  }, [confirmUnsaved, doc, engine, showDoc]);
 
+  /** Opens a file (the unsaved-changes question has been answered). */
   const openFile = useCallback(
     async (file: PickedFile) => {
       setBusy(true);
       setError(null);
       try {
         if (doc) await engine.close(doc.open.doc);
-        await showDoc(await engine.open(file.bytes, file.fileName));
+        await showDoc(await engine.open(file.bytes, file.fileName), file.handle);
       } catch (e) {
         setDoc(null);
         setError(e instanceof Error ? e.message : String(e));
@@ -269,22 +336,133 @@ export function App({ engine }: { engine: EngineClient }) {
 
   const onOpen = useCallback(async () => {
     try {
+      if (!(await confirmUnsaved())) return;
       const picked = await pickDocument();
       if (picked) await openFile(picked);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [openFile]);
+  }, [confirmUnsaved, openFile]);
 
   const onDrop = useCallback(
     async (ev: DragEvent) => {
       ev.preventDefault();
       setDragging(false);
       const file = ev.dataTransfer.files[0];
-      if (file) await openFile({ fileName: file.name, bytes: await file.arrayBuffer() });
+      if (!file) return;
+      const bytes = await file.arrayBuffer();
+      if (await confirmUnsaved()) await openFile({ fileName: file.name, bytes });
     },
-    [openFile],
+    [confirmUnsaved, openFile],
   );
+
+  // AutoRecover: a copy a couple of seconds after the last change (at least
+  // every 30 s while editing goes on), kept until the drawing is saved.
+  const lastKept = useRef(0);
+  useEffect(() => {
+    if (!doc || !dirty) return;
+    const wait = Date.now() - lastKept.current > 30_000 ? 0 : 2_000;
+    const timer = setTimeout(async () => {
+      try {
+        const bytes = await engine.save(doc.open.doc);
+        lastKept.current = Date.now();
+        await keepRecoveryCopy({ fileName: `${stem}.vsdx`, title: stem, savedAt: lastKept.current, bytes });
+      } catch {
+        // A drawing the engine cannot save has nothing to recover.
+      }
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [doc, dirty, engine, stem, version]);
+
+  // A copy left behind by a crash is offered on the start screen.
+  useEffect(() => {
+    void recoveryCopy().then(setRecovery);
+  }, []);
+
+  const onRecover = useCallback(async () => {
+    const copy = recovery;
+    if (!copy) return;
+    setRecovery(null);
+    await openFile({ fileName: copy.fileName, bytes: copy.bytes.slice(0) });
+    // Still unsaved: Save asks where, and the copy stays until then.
+    setDirty(true);
+  }, [openFile, recovery]);
+
+  const onDiscardRecovery = useCallback(() => {
+    setRecovery(null);
+    void clearRecoveryCopy();
+  }, []);
+
+  // The host warns before the window closes on unsaved changes; a browser tab asks too.
+  useEffect(() => {
+    void setDocumentState(dirty, stem).catch(() => {});
+    if (!dirty || inTauri) return;
+    const ask = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", ask);
+    return () => window.removeEventListener("beforeunload", ask);
+  }, [dirty, stem]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  /** Visible foreground pages, in order: what Export and Print cover. */
+  const outputPages = useMemo(() => (doc?.pages ?? []).filter((p) => !p.background && !p.hidden), [doc]);
+
+  const onExport = useCallback(
+    async (choice: ExportChoice) => {
+      if (!doc || !dl) return;
+      setExporting(false);
+      setError(null);
+      // One page of several gets its name in the file name.
+      const one = outputPages.length > 1 ? `${stem} - ${dl.page.name}` : stem;
+      try {
+        let saved: string | null = null;
+        if (choice.format === "pdf") {
+          const pages = choice.allPages ? outputPages.map((p) => p.index) : [page];
+          saved = await exportPdf(`${choice.allPages ? stem : one}.pdf`, await engine.save(doc.open.doc), pages);
+        } else if (choice.format === "png") {
+          saved = await exportFile(`${one}.png`, await pagePng(dl, choice.dpi), "png");
+        } else {
+          const svg = await engine.request<string>({ kind: "export", doc: doc.open.doc, format: "svg", opts: { page } });
+          saved = await exportFile(`${one}.svg`, new TextEncoder().encode(svg).buffer as ArrayBuffer, "svg");
+        }
+        if (saved) setNotice(`Exported ${saved}`);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [dl, doc, engine, outputPages, page, stem],
+  );
+
+  /** Lays the visible pages out as images and opens the system print dialog. */
+  const onPrint = useCallback(async () => {
+    if (!doc) return;
+    setError(null);
+    try {
+      const out = [];
+      for (const p of outputPages) {
+        const list = await engine.query(doc.open.doc, { kind: "pageDisplayList", page: p.index });
+        const img = await pageImage(list, 200);
+        out.push({ url: img.toDataURL("image/png"), width: list.page.width, height: list.page.height });
+      }
+      setPrintPages(out);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [doc, engine, outputPages]);
+
+  // Print once the page images are in the document; tidy up afterwards.
+  useEffect(() => {
+    if (!printPages) return;
+    const done = () => setPrintPages(null);
+    window.addEventListener("afterprint", done, { once: true });
+    const imgs = [...document.querySelectorAll<HTMLImageElement>(".print-pages img")];
+    void Promise.all(imgs.map((i) => i.decode().catch(() => {}))).then(() => window.print());
+    return () => window.removeEventListener("afterprint", done);
+  }, [printPages]);
 
   const exec = useCallback(
     async (cmd: Command): Promise<ChangeSummary | null> => {
@@ -354,22 +532,6 @@ export function App({ engine }: { engine: EngineClient }) {
     },
     [dl, onCanvasCommand, page],
   );
-
-  const onSave = useCallback(async () => {
-    if (!doc) return;
-    setError(null);
-    try {
-      const bytes = await engine.save(doc.open.doc);
-      const stem = doc.info.fileName.replace(/\.[^.]+$/, "");
-      const saved = await saveDocument(`${stem}.vsdx`, bytes);
-      if (saved) {
-        setSavedAs(saved);
-        setDirty(false);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [doc, engine]);
 
   const deleteSelection = useCallback(() => {
     if (selection.length > 0) void exec({ kind: "deleteShapes", page, shapes: selection });
@@ -582,7 +744,13 @@ export function App({ engine }: { engine: EngineClient }) {
         void onOpen();
       } else if (mod && key === "s") {
         e.preventDefault();
-        void onSave();
+        if (doc?.pages.length) void (e.shiftKey ? onSaveAs() : onSave());
+      } else if (mod && e.shiftKey && key === "e" && drawing) {
+        e.preventDefault();
+        setExporting(true);
+      } else if (mod && !e.shiftKey && key === "p" && drawing) {
+        e.preventDefault();
+        void onPrint();
       } else if (mod && key === "n") {
         e.preventDefault();
         void onNew();
@@ -683,7 +851,7 @@ export function App({ engine }: { engine: EngineClient }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [doc, drawing, exec, onOpen, onNew, onSave, stepZoom, deleteSelection, selectAll, editText, selection, selectedFormat, applyFormat, arrange, page,
-    onCopy, onCut, onPaste, duplicate, pasteStyle, nudge, zoomToSelection]);
+    onCopy, onCut, onPaste, duplicate, pasteStyle, nudge, zoomToSelection, onSaveAs, onPrint]);
 
   const menus: Menu[] = useMemo(
     () => [
@@ -693,7 +861,11 @@ export function App({ engine }: { engine: EngineClient }) {
           { label: "New drawing", icon: "new", keys: "Ctrl+N", run: () => void onNew() },
           { label: "Open…", icon: "open", keys: "Ctrl+O", run: () => void onOpen(), disabled: busy },
           "separator",
-          { label: "Save as .vsdx…", icon: "save", keys: "Ctrl+S", run: () => void onSave(), disabled: !doc?.pages.length },
+          { label: "Save", icon: "save", keys: "Ctrl+S", run: () => void onSave(), disabled: !doc?.pages.length },
+          { label: "Save as…", keys: "Ctrl+Shift+S", run: () => void onSaveAs(), disabled: !doc?.pages.length },
+          "separator",
+          { label: "Export…", icon: "export", keys: "Ctrl+Shift+E", run: () => setExporting(true), disabled: !drawing },
+          { label: "Print…", icon: "print", keys: "Ctrl+P", run: () => void onPrint(), disabled: !drawing },
         ],
       },
       {
@@ -781,7 +953,7 @@ export function App({ engine }: { engine: EngineClient }) {
     ],
     [busy, deleteSelection, doc, drawing, editText, exec, inspector, shapesPanel, mode, onNew, onOpen, onSave, selectAll, selection, stepZoom, undo,
       autoFit, rulers, grid, alignItems, positionItems, frontItems, backItems, groupItems,
-      onCut, onCopy, onPaste, duplicate, pasteStyle, selectedFormat, styleClip, hasClip, zoomToSelection, snapGrid, smartGuides, minimap],
+      onCut, onCopy, onPaste, duplicate, pasteStyle, selectedFormat, styleClip, hasClip, zoomToSelection, snapGrid, smartGuides, minimap, onSaveAs, onPrint],
   );
 
   // The command palette lists every enabled menu command, then pages and shapes.
@@ -834,7 +1006,8 @@ export function App({ engine }: { engine: EngineClient }) {
     }));
   }, [palette, library, addFromLibrary]);
 
-  const title = doc?.info.meta.title || doc?.info.fileName.replace(/\.[^.]+$/, "") || "";
+  // The saved file's name once there is one, else the drawing's title.
+  const title = savedAs ? stem : doc?.info.meta.title || stem;
 
   return (
     <div
@@ -889,7 +1062,7 @@ export function App({ engine }: { engine: EngineClient }) {
           <div className="tb-group">
             <ToolButton icon="new" label="New drawing" keys="Ctrl+N" onClick={() => void onNew()} />
             <ToolButton icon="open" label="Open" keys="Ctrl+O" onClick={() => void onOpen()} disabled={busy} />
-            <ToolButton icon="save" label="Save as .vsdx" keys="Ctrl+S" onClick={() => void onSave()} disabled={!doc.pages.length} />
+            <ToolButton icon="save" label="Save" keys="Ctrl+S" onClick={() => void onSave()} disabled={!doc.pages.length} />
           </div>
           <div className="tb-group">
             <ToolButton
@@ -952,7 +1125,29 @@ export function App({ engine }: { engine: EngineClient }) {
             </button>
           </div>
         )}
-        {!doc && <Welcome onNew={() => void onNew()} onOpen={() => void onOpen()} busy={busy} />}
+        {notice && (
+          <div className="banner info" role="status">
+            <Icon name="check" size={16} />
+            <span>{notice}</span>
+          </div>
+        )}
+        {!doc && (
+          <Welcome
+            onNew={() => void onNew()}
+            onOpen={() => void onOpen()}
+            busy={busy}
+            notice={
+              recovery && (
+                <RecoveryNotice
+                  title={recovery.title}
+                  savedAt={recovery.savedAt}
+                  onRecover={() => void onRecover()}
+                  onDiscard={onDiscardRecovery}
+                />
+              )
+            }
+          />
+        )}
         {doc && mode === "package" && <PackageView open={doc.open} pkg={doc.pkg} info={doc.info} />}
         {doc && mode === "drawing" && (
           <div className="stage">
@@ -1180,6 +1375,41 @@ export function App({ engine }: { engine: EngineClient }) {
       )}
       {dialog === "shortcuts" && <ShortcutsDialog onClose={() => setDialog(null)} />}
       {dialog === "about" && <AboutDialog onClose={() => setDialog(null)} />}
+      {unsaved && (
+        <UnsavedDialog
+          title={stem}
+          onSave={() => {
+            setUnsaved(null);
+            void saveTo(false).then(unsaved);
+          }}
+          onDiscard={() => {
+            setUnsaved(null);
+            void clearRecoveryCopy();
+            unsaved(true);
+          }}
+          onCancel={() => {
+            setUnsaved(null);
+            unsaved(false);
+          }}
+        />
+      )}
+      {exporting && dl && (
+        <ExportDialog
+          pdf={canExportPdf}
+          pageName={dl.page.name}
+          pageCount={outputPages.length}
+          onExport={(c) => void onExport(c)}
+          onClose={() => setExporting(false)}
+        />
+      )}
+      {printPages && (
+        <div className="print-pages" aria-hidden="true">
+          <style>{`@page { size: ${printPages[0]?.width ?? 11}in ${printPages[0]?.height ?? 8.5}in; margin: 0; }`}</style>
+          {printPages.map((p, i) => (
+            <img key={i} src={p.url} alt="" style={{ width: `${p.width}in`, height: `${p.height}in` }} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

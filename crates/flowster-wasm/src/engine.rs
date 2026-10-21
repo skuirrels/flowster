@@ -274,7 +274,19 @@ impl Engine {
             }
             EngineRequest::Gesture { .. } => vec![EngineEvent::Reply { id, result: Value::Null }],
             EngineRequest::Save { .. } => error(id, "save returns bytes; use Engine::save"),
-            EngineRequest::Export { .. } => error(id, "Export arrives in M1 (SPEC §19.3)"),
+            // SVG here (text as <text> runs, so the viewer's fonts set it). PDF needs font
+            // files, so the desktop host makes it; PNG comes from the canvas renderer.
+            EngineRequest::Export { doc, format, opts } => {
+                let Some(d) = self.docs.get(&doc) else { return error(id, format!("no document {doc}")) };
+                let page = opts.get("page").and_then(Value::as_u64).unwrap_or(0) as usize;
+                match (format.as_str(), d.model.as_ref().and_then(|m| flowster_render::build_page(m, page))) {
+                    ("svg", Some(dl)) => {
+                        vec![EngineEvent::Reply { id, result: Value::String(flowster_render::svg::to_svg(&dl)) }]
+                    }
+                    ("svg", None) => error(id, format!("no page {page}")),
+                    (other, _) => error(id, format!("the engine cannot export {other}")),
+                }
+            }
             EngineRequest::Close { doc } => {
                 self.docs.remove(&doc);
                 vec![EngineEvent::Reply { id, result: Value::Null }]
@@ -374,6 +386,24 @@ mod tests {
         let s = &back.pages[0].shapes[0];
         assert_eq!(s.text, Some(vec![flowster_core::model::TextPiece::Text("Hi".into())]));
         assert_eq!(s.sheet.sections[0].rows[0].t.as_deref(), Some("Ellipse"));
+    }
+
+    #[test]
+    fn a_page_exports_as_svg() {
+        let mut e = Engine::new();
+        let ev = e.handle(1, EngineRequest::New { title: None });
+        let doc = reply(&ev)["doc"].as_str().unwrap().to_owned();
+        let add = Command::AddShape { page: 0, shape: "rectangle".into(), x: 1.0, y: 1.0, w: 2.0, h: 1.0 };
+        e.handle(2, EngineRequest::Exec { doc: doc.clone(), cmd: add });
+        let ev =
+            e.handle(3, EngineRequest::Export { doc: doc.clone(), format: "svg".into(), opts: json!({"page": 0}) });
+        let svg = reply(&ev).as_str().unwrap();
+        assert!(svg.starts_with("<svg") && svg.contains("<path"));
+        let ev =
+            e.handle(4, EngineRequest::Export { doc: doc.clone(), format: "svg".into(), opts: json!({"page": 3}) });
+        assert!(matches!(ev[0], EngineEvent::Error { .. }));
+        let ev = e.handle(5, EngineRequest::Export { doc, format: "pdf".into(), opts: json!({}) });
+        assert!(matches!(ev[0], EngineEvent::Error { .. }), "PDF is the host's job");
     }
 
     #[test]

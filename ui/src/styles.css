@@ -908,6 +908,8 @@ kbd {
   flex: 1;
   display: grid;
   place-items: center;
+  align-content: center;
+  gap: 16px;
   padding: 24px;
   background:
     radial-gradient(1200px 500px at 50% -10%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 60%),
@@ -1696,4 +1698,147 @@ table {
   padding: 16px;
   color: var(--muted);
   text-align: center;
+}
+
+/* Dialog content: text, choices and the button row. */
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.btn.primary:hover {
+  background: var(--accent-hover);
+}
+
+.dialog-text {
+  margin: 4px 0 8px;
+}
+
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.dialog-actions .spacer {
+  flex: 1;
+}
+
+.choice-list {
+  margin: 8px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.choice-list legend {
+  margin-bottom: 6px;
+  padding: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.choice:hover {
+  background: var(--hover);
+}
+
+.choice input {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+
+.choice > span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.choice .muted {
+  font-size: 12px;
+}
+
+.choice.disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.banner.info {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding-right: 14px;
+}
+
+/* A drawing that can be recovered, above the start card. */
+.recovery {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(560px, 100%);
+  padding: 12px 14px;
+  background: var(--raised);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  color: var(--warn);
+}
+
+.recovery-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text);
+}
+
+.recovery-text span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Printing: only the page images, one per sheet. */
+.print-pages {
+  display: none;
+}
+
+@media print {
+  html,
+  body,
+  #root,
+  .app {
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+
+  .app > :not(.print-pages) {
+    display: none !important;
+  }
+
+  .print-pages {
+    display: block;
+  }
+
+  .print-pages img {
+    display: block;
+    break-after: page;
+  }
+
+  .print-pages img:last-child {
+    break-after: auto;
+  }
 }
