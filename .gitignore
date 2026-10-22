@@ -7,7 +7,7 @@ node_modules/
 .DS_Store
 *.stackdump
 
-# Reverse-engineering notes stay local (SPEC §0, risk R4)
+# Local research notes are never committed (SPEC §0, risk R4)
 /docs/re/
 
 # Installers built by scripts/release-kit

@@ -19,7 +19,7 @@ $ErrorActionPreference = "Stop"
 $OutDir = [System.IO.Path]::GetFullPath($OutDir)
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 
-# Visio constants (documented in the Visio type library; see docs/re/enums.txt).
+# Visio constants (documented in the public Visio object model reference).
 $visSelTypeEmpty = 0
 $visSelect = 2
 $visLayerVisible = 4

@@ -10,6 +10,7 @@
     "build:wasm:dev": "node scripts/build-wasm.mjs --dev",
     "dev": "pnpm --filter flowster-ui dev",
     "build": "pnpm --filter flowster-ui build",
+    "notices": "node scripts/third-party-notices.mjs",
     "typecheck": "pnpm --filter flowster-ui typecheck",
     "determinism": "node scripts/determinism-check.mjs",
     "spike": "node scripts/crdt-spike.mjs",

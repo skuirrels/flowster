@@ -10,6 +10,7 @@
 //   files.json                 each file's version and platform
 //   release.json               name, version and downloads, for the GitHub release workflow below
 //   index.html, icon.svg, SHA256SUMS.txt, README.md, RELEASE-NOTES.md, .github/workflows/release.yml
+//   CHANGELOG.md               the app's CHANGELOG.md, when it has one
 // Anything else is removed (older site layouts are moved into this one first).
 
 import { createHash } from "node:crypto";
@@ -83,7 +84,7 @@ function walk(dir, root = dir) {
 
 const sha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 
-export function buildSite({ site, out, name, version, sha, notes, siteUrl, combinedFeed, icon, page, extras, macMin, platforms }) {
+export function buildSite({ site, out, name, version, sha, notes, changelog, siteUrl, combinedFeed, icon, page, extras, macMin, platforms }) {
   const entries = catalog(name, extras.files ?? []);
   const byFile = new Map(entries.map((e) => [e.file, e]));
   const feedsDir = join(site, "updates");
@@ -193,10 +194,11 @@ export function buildSite({ site, out, name, version, sha, notes, siteUrl, combi
   if (icon && existsSync(icon)) copyFileSync(icon, join(site, "icon.svg"));
   writeJson(join(site, "files.json"), Object.fromEntries(Object.keys(files).sort().map((f) => [f, files[f]])));
   writeJson(join(site, "release.json"), { name, version: siteVersion, files: visible.map((e) => e.file) });
-  const ctx = { name, version: siteVersion, sha, notes, siteUrl, page, extras, macMin, files, visible, checksums, site, now };
+  const ctx = { name, version: siteVersion, sha, notes, changelog, siteUrl, page, extras, macMin, files, visible, checksums, site, now };
   writeFileSync(join(site, "index.html"), renderPage(ctx));
   writeFileSync(join(site, "README.md"), renderReadme(ctx));
   writeFileSync(join(site, "RELEASE-NOTES.md"), renderReleaseNotes(ctx));
+  if (changelog) writeFileSync(join(site, "CHANGELOG.md"), `${changelog}\n`);
   mkdirSync(join(site, ".github", "workflows"), { recursive: true });
   writeFileSync(join(site, ".github", "workflows", "release.yml"), WORKFLOW);
   writeFileSync(join(site, ".nojekyll"), "");
@@ -205,7 +207,7 @@ export function buildSite({ site, out, name, version, sha, notes, siteUrl, combi
   const keep = new Set([
     ...Object.keys(files),
     combinedFeed, "files.json", "release.json", "index.html", "icon.svg", "SHA256SUMS.txt", "README.md", "RELEASE-NOTES.md",
-    ".nojekyll", ".github/workflows/release.yml",
+    ".nojekyll", ".github/workflows/release.yml", ...(changelog ? ["CHANGELOG.md"] : []),
   ]);
   for (const path of walk(site)) {
     if (!keep.has(path) && !/^updates\/[\w-]+\.json$/.test(path)) rmSync(join(site, path), { force: true });
@@ -245,6 +247,13 @@ function markdown(md) {
   if (list) html.push("</ul>");
   return html.join("\n");
 }
+
+/** The change log without its title, headings one level down: `## 1.2.3 · date` becomes `### 1.2.3 · date`. */
+const changelogBody = (md) => md.replace(/^# .*\r?\n+/, "").replace(/^## /gm, "### ");
+
+/** The page's change log: each version a heading with its date muted. */
+const changelogHtml = (md) =>
+  markdown(changelogBody(md)).replace(/<h4>(.*?) · (.*?)<\/h4>/g, '<h4>$1 <span class="date">$2</span></h4>');
 
 /** How installed copies find updates (page.updateNote overrides it for an app without a Help menu item). */
 const updateNote = (ctx) =>
@@ -383,6 +392,9 @@ ${list.map((e, i) => downloadLink(ctx, e, i === 0)).join("\n")}
   .help div, .notes { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; font-size: .92rem; min-width: 0; }
   .notes { padding: 6px 20px; font-size: 1rem; }
   .notes h4 { margin: 16px 0 6px; }
+  .notes h4 .date { font-weight: 400; color: var(--muted); font-size: .85rem; margin-left: 6px; }
+  .notes ul { margin: 0 0 8px; padding-left: 20px; }
+  .notes li { margin: 3px 0; }
   .help h3 { margin: 0 0 6px; font-size: 1rem; }
   pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; overflow-x: auto; font-size: .8rem; }
   .update { display: flex; gap: 14px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; }
@@ -399,7 +411,7 @@ ${list.map((e, i) => downloadLink(ctx, e, i === 0)).join("\n")}
       <p class="tagline">${page.tagline ?? ""}</p>
       <a class="cta" id="cta" href="#downloads">Download ${esc(name)} <small id="cta-sub">Windows · macOS · Linux</small></a>
       <div class="version">Version ${esc(version)} · ${esc(date)} · ${esc(page.license ?? "free download")}</div>
-      <div class="other"><a href="#downloads">All downloads</a> · <a href="SHA256SUMS.txt">Checksums</a></div>
+      <div class="other"><a href="#downloads">All downloads</a> · <a href="SHA256SUMS.txt">Checksums</a>${ctx.changelog ? ` · <a href="#changelog">Change log</a>` : ""}</div>
     </div>
   </div>
 
@@ -446,6 +458,11 @@ ${ctx.notes ? `
     <section>
       <h2>What's new in ${esc(version)}</h2>
       <div class="notes">${markdown(ctx.notes)}</div>
+    </section>
+` : ""}${ctx.changelog ? `
+    <section id="changelog">
+      <h2>Change log</h2>
+      <div class="notes">${changelogHtml(ctx.changelog)}</div>
     </section>
 ` : ""}  </main>
 
@@ -511,7 +528,11 @@ The same files are attached to the [latest release](../../releases/latest) and l
 - **Linux:** the AppImage runs on any distribution; use the .deb on Debian/Ubuntu and the .rpm on Fedora/openSUSE.
 
 Installed copies update themselves: ${updateNote(ctx)}
-`;
+${ctx.changelog ? `
+## Change log
+
+What changed in each version: [CHANGELOG.md](CHANGELOG.md), also on the [download page](${ctx.siteUrl}#changelog).
+` : ""}`;
 }
 
 function renderReleaseNotes(ctx) {
@@ -521,7 +542,11 @@ function renderReleaseNotes(ctx) {
 ${ctx.notes ? `${ctx.notes}\n\n` : ""}${list.join("\n")}
 
 Installed copies update themselves: ${updateNote(ctx)} Download page: ${ctx.siteUrl}
-`;
+${ctx.changelog ? `
+## Change log
+
+${changelogBody(ctx.changelog)}
+` : ""}`;
 }
 
 /** Runs in the releases repo (public, so it costs no Actions minutes): its latest GitHub release is this site's files. */

@@ -25,7 +25,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { GROUPS_BY_OS, FEED_GROUPS, buildSite, catalog, newer } from "./site.mjs";
 
-export const KIT_VERSION = "1.0.2";
+export const KIT_VERSION = "1.0.4";
 
 const kitDir = dirname(fileURLToPath(import.meta.url));
 const appDir = join(kitDir, "..", "..");
@@ -365,7 +365,13 @@ cd "$dir"
 git -c safe.directory='*' fetch --quiet "$src" HEAD
 git checkout --quiet --force FETCH_HEAD
 [ "$(git rev-parse HEAD)" = ${sha} ] || { echo "release: the WSL copy isn't at ${sha.slice(0, 7)}" >&2; exit 1; }
-cd ${sh(rel)}
+cd ${sh(rel)}${PM.lock === "pnpm-lock.yaml" ? `
+# WSL also sees the Windows PATH: a pnpm under /mnt/ is the Windows one, which can't build here.
+case "$(command -v pnpm || true)" in
+  "" | /mnt/*) echo "release: WSL has no Linux pnpm; run: make linux-setup" >&2; exit 1 ;;
+esac
+# Corepack fetches the app's pnpm version without asking.
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0` : ""}
 RELEASE_KEY_DIR=${sh(wslPath(keyDir))} node scripts/release-kit/release.mjs build ${flags.has("--force") ? "--force" : ""}
 cp -f release/${v}/* ${sh(wslPath(out))}/
 rm -rf release
@@ -442,6 +448,7 @@ async function publish() {
   cloneSite(site);
   const sha = output("git", ["rev-parse", "HEAD"]) ?? "";
   const notesFile = join(appDir, "release-notes", `${v}.md`);
+  const changelogFile = join(appDir, "CHANGELOG.md");
   const summary = buildSite({
     site,
     out,
@@ -449,6 +456,7 @@ async function publish() {
     version: v,
     sha,
     notes: existsSync(notesFile) ? readFileSync(notesFile, "utf8").trim() : "",
+    changelog: existsSync(changelogFile) ? readFileSync(changelogFile, "utf8").trim() : "",
     siteUrl: SITE_URL,
     combinedFeed: config.combinedFeed,
     icon: join(appDir, config.icon),

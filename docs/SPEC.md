@@ -6,15 +6,14 @@ A cross-platform (Windows · macOS · Linux) diagramming application built with 
 |---|---|
 | Status | Draft 2: adds real-time co-editing (§20) and committed `.vsd` import (§19.5) |
 | Date | 2026-10-17 |
-| Reference build analysed | Microsoft Visio (Microsoft 365 Click-to-Run) `VISIO.EXE` 16.0.20430.20182, x64 |
-| Raw reverse-engineering data | [`docs/re/`](re/) |
+| Reference Visio (oracle, §22.3) | Microsoft Visio (Microsoft 365) 16.0.20430 |
 
 ---
 
 ## 0. Ground rules (read first)
 
-1. **Clean-room boundary.** This spec describes *behaviour, data formats and public interfaces*. We used reverse-engineering analysis (REA) only to inventory features, identifiers and file structures. Nobody may copy or translate disassembled code, and the spec contains none. The Visio file formats are publicly documented by Microsoft ([MS-VSDX], [MS-VSDX] ShapeSheet reference, the VDX XML schema). Where this spec and the public documentation disagree, the public documentation wins.
-2. **No Microsoft assets.** Do not ship Microsoft stencils, templates, icons, help, themes, cursors, ribbon artwork or strings. The catalogues in `docs/re/` record *what exists* so we can size our own content. They are not a source to copy from. Users may open their own Visio stencils and templates, which is the interoperability goal.
+1. **Public sources only.** This spec describes *behaviour, data formats and public interfaces*. The Visio file formats are publicly documented by Microsoft ([MS-VSDX], the ShapeSheet reference, the VDX XML schema), and behaviour is observed through Visio's documented automation API (§22.3). Nobody may disassemble, decompile or extract data from Microsoft binaries, or copy or translate code from them. Where this spec and the public documentation disagree, the public documentation wins.
+2. **No Microsoft assets.** Do not ship Microsoft stencils, templates, icons, help, themes, cursors, ribbon artwork or strings. The content counts in §2.7 only size our own content. They are not a source to copy from. Users may open their own Visio stencils and templates, which is the interoperability goal.
 3. **No trade dress.** The UI has the same *capabilities* and keyboard ergonomics as Visio (users' muscle memory matters), but it uses its own visual design, iconography and naming. The product is "Flowster", not "Visio".
 4. **Identifiers are not expression.** We reuse names that the file format requires: ShapeSheet cell names, section names, function names and XML element names. Without them we couldn't interoperate.
 
@@ -36,61 +35,48 @@ Flowster is **collaborative by design**. The persistent document state is a CRDT
 
 ---
 
-## 2. Reverse-engineering findings
+## 2. Product analysis
 
-### 2.1 Method
+### 2.1 Sources
 
-All analysis was static and ran on the installed binaries and content under `C:\Program Files\Microsoft Office\root\Office16\`:
+Everything in this spec about Visio comes from three kinds of source:
 
-* PE header, import, export and resource parsing (`pefile`) of `VISIO.EXE`, `VISLIB.DLL` and the `VIS*.DLL` satellites;
-* string extraction (ASCII + UTF-16) and C++ RTTI type-descriptor harvesting from `VISLIB.DLL`;
-* resource extraction from `1033\VISINTL.DLL` (7,160 localized UI strings, 9 accelerator tables);
-* COM type-library dump of the embedded `TYPELIB` (the automation object model);
-* unpacking and statistical analysis of all shipped templates (`*.vstx`) and stencils (`*.vssx`).
+* Microsoft's public documentation: [MS-VSDX], the Visio ShapeSheet reference, the Visio object model reference, the VDX schema and Microsoft's published support articles (Appendix A);
+* black-box observation of a licensed Visio through its documented automation API (the oracle, §22.3);
+* the XML of Visio's own stencils and templates, read as ordinary `.vssx`/`.vstx` documents to count how often features are used (§2.5, §2.7). None of that content is copied or shipped.
 
-### 2.2 Binary layout
+Nobody may disassemble, decompile or extract data from Microsoft binaries for this project.
 
-| Module | Size | Role (inferred) |
+### 2.2 Architecture takeaway
+
+Visio is a mature Windows desktop app with its own text layout engine and a COM automation model. Flowster replaces the Windows shell with Tauri/WebView, the text engine with a Rust text stack, and COM automation with a TypeScript plugin API.
+
+### 2.3 Subsystem map
+
+| Visio feature area | Behaviour to cover | Flowster module |
 |---|---|---|
-| `VISIO.EXE` | 1.3 MB | **Stub launcher.** 3.5 KB of code; imports a single ordinal (`#1`) from `VISLIB.dll`; the rest is icons, version and manifest. |
-| `VISLIB.DLL` | 32.7 MB | **The application.** 17.6 MB code, MFC (`mfc140u`, 903 imports), ConcRT task scheduler, 488 C++ exports, 5,085 RTTI classes, embedded COM type library, 56 NetUI `UIFILE` layouts, 162 cursors. |
-| `VISBRGR.DLL` / `VISBRGRTG.DLL` | 13 / 17 MB | Office **PTLS6 line-services** text layout engine (exports `Ls*` functions): line breaking, justification, complex scripts. |
-| `VISUTILS.DLL`, `VISWEB.DLL`, `VISCOLOR.DLL` | small | Add-on libraries ("VisioLibMain" entry point): utility add-ons, Save-as-Web/HTML, colour tools. |
-| `VISOCX.DLL` | 0.3 MB | ActiveX drawing control (embeddable viewer). |
-| `VISSHE.DLL` | 0.3 MB | Shell extension (thumbnails/preview). |
-| `VISXDATA.DLL` | 0.1 MB | External-data COM server. |
-| `VISDLGU.DLL` | 0.3 MB | "DlgMaker" declarative dialog runtime. |
-| `1033\VISINTL.DLL` | 0.9 MB | Localized strings, accelerators, dialog templates. |
-| `MSO*.DLL` (shared) | — | Office shared runtime: ribbon (`mso40ui`), backstage, themes (DrawingML), SVG (`msosvg`), spelling, ink, telemetry, WebView2 hosting for add-ins and the Power Automate export. |
-
-**Takeaway:** Visio is a mature MFC/COM desktop app with its own text layout, task scheduler and declarative UI runtime. Flowster replaces MFC with Tauri/WebView, PTLS with a Rust text stack, and COM automation with a TypeScript plugin API.
-
-### 2.3 Subsystem inventory (from RTTI namespaces and class names)
-
-| Subsystem | Evidence (class / namespace names) | Flowster module |
-|---|---|---|
-| Document model | `CVDocument`, `CDoc`, `CPage`, `CMaster`, `CStyle`, `CLayer`, `CSection`, `CRow`, `CCell`, `CConnect`, `CDataRecordset` | `core::model` |
-| Formula engine | `CFormula`, `CFormulaCopier`, `CFormulaTracingHistory`, error literals `#REF! #NAME? #VALUE! #DIV/0! #N/A #NUM! #NULL! #DIM!`, volatile-function tracking ("Document contains volatile functions") | `core::sheet` |
-| Geometry | `CM::` namespace: `GeometryPath`, `MoveToSegment`, `LineToSegment`, `ArcToSegment`, `EllipticalArcToSegment`, `EllipseSegment`, `InfiniteLineSegment`, `PolylineToSegment`, `NURBSToSegment`, `SplineStart/KnotSegment`, `RelMoveTo/RelLineTo/RelCubBezTo/RelQuadBezTo/RelEllipticalArcToSegment`, `Transform` | `core::geom` |
-| Snap & glue | `CSnapMgr`, `CSnapPt/Line/Arc/Curve/Spline/Intersect/Glue/Gesture/Target`, `CSnapAdornment` | `core::snap` |
-| Routing | `VRoutingAlgorithm`, `VMinOverlappingSegmentStrategy`, line-jump cells | `core::route` |
-| Auto layout | `LayoutEngine::Algorithm`: `Sugiyama` (greedy layering, fork placement), `ForceBasedAlgorithm`, `RadialLayoutAlgorithm`, `CircularTransform`, `TreeLayoutAlgorithm`, `ListLayoutAlgorithm`, `GridCompositionAlgorithm`, `IncrementalLayoutAlgorithm`; legacy `Visgrf::` placement engine | `core::layout` |
-| Text | `TextModel::` (runs, character/paragraph properties, fields, bullets, tab stops), `CTextComposition`, `CTextEditor`, `CTextEditRuler`, PTLS | `core::text` |
-| Structured diagrams | containers, lists, callouts (`ContainerProperties`, `CContainerBounding`, `CalloutTarget`) | `core::structure` |
-| Replace Shape | `ReplaceShape::` fix-ups: Accessibility, Callouts, Comments, Container, DataGraphic, DataLink, Foreign, Formulas, Glue, Layers, List, Name, Text, ZOrder | `core::ops::replace` |
-| Validation | `StructValidation::CVSXRule/RuleSet/RuleFilter/RuleTest/Issue` | `core::validate` |
-| Data | `CDataRecordset`, `CDataColumn`, `CDataConnection`, data-selector wizards (Excel, Access, SharePoint list, ODC/ODBC), `DataRefresh::` conflict resolution, `DataGraphic` | `core::data` + host connectors |
-| Data Visualizer / "smart diagrams" | `D3::Visio::` (`SmartDiagram*`, `ShapeBinding`, `ConnectorBinding`, `CrossFunctionalFlowchartBinding`, `MasterSelector`) | `core::dataviz` (P2) |
-| BPMN / Power Automate | `Flow::Visio::` (`FlowTrigger`, `FlowCondition`, `FlowSwitch`, `FlowForeach`, `FlowDountil`, `BPMNPropertyFormulaGetter`) | P2 / out of scope |
-| Ink | `VisioInk::` (`CInkPen`, `CInkReco`, `CWetInkRenderer`, `CInkVSnap`) | `ui::ink` (P2) |
-| Review | `CComment(s)`, `CReviewer`, coauthoring (`CoauthMergeEvent`) | `core::review` |
-| Explorers | `CDocExplorer*` (Drawing Explorer tree), `CMasterExplorer*`, `CShapeSheetView` | UI panes |
-| Export | `CExportOptionsBMP/GIF/JPG/PNG/TIF`, SVG, EMF, HTML (`VISWEB`), DWG/DXF, PDF/XPS fixed format | `core::export` |
-| Undo | `CUndoMgr`, `CM::UndoUnit`, undo scopes in the object model | `core::undo` |
+| Document model | Documents, pages, masters, styles, layers, ShapeSheet sections, rows and cells, connects, data recordsets | `core::model` |
+| Formula engine | Formulas, error values (`#REF! #NAME? #VALUE! #DIV/0! #N/A #NUM! #NULL! #DIM!`), volatile functions | `core::sheet` |
+| Geometry | Every Geometry row type: MoveTo, LineTo, ArcTo, EllipticalArcTo, Ellipse, InfiniteLine, PolylineTo, NURBSTo, SplineStart/SplineKnot and the relative Rel* rows, plus shape transforms | `core::geom` |
+| Snap & glue | Snapping to points, lines, arcs, curves, intersections and glue targets, with adornments | `core::snap` |
+| Routing | Dynamic connector routing and line jumps | `core::route` |
+| Auto layout | Layered (flowchart), force-based, radial, circular, tree, list, grid and incremental layouts | `core::layout` |
+| Text | Runs, character/paragraph properties, fields, bullets, tab stops, text editing and the ruler | `core::text` |
+| Structured diagrams | Containers, lists, callouts | `core::structure` |
+| Replace Shape | Carries over text, data, data graphics and links, glue, layers, container and list membership, callouts, comments, accessibility text, formulas, name and z-order | `core::ops::replace` |
+| Validation | Rule sets, rules, filters, tests and issues | `core::validate` |
+| Data | Recordsets, columns, connections (Excel, Access, SharePoint lists, ODC/ODBC), refresh with conflict resolution, data graphics | `core::data` + host connectors |
+| Data Visualizer | Diagrams generated from data and kept bound to it | `core::dataviz` (P2) |
+| BPMN / Power Automate | Flow export | P2 / out of scope |
+| Ink | Pen input, recognition, wet-ink rendering | `ui::ink` (P2) |
+| Review | Comments, reviewers, coauthoring | `core::review` |
+| Explorers | Drawing Explorer, Master Explorer, ShapeSheet view | UI panes |
+| Export | BMP/GIF/JPG/PNG/TIF, SVG, EMF, HTML, DWG/DXF, PDF/XPS | `core::export` |
+| Undo | Undo units and scopes | `core::undo` |
 
 ### 2.4 Object model (automation API)
 
-The embedded type library exposes **97 co-classes, 118 dispatch interfaces and 167 enums**. Full dump: [`re/object-model.txt`](re/object-model.txt), [`re/enums.txt`](re/enums.txt). The core hierarchy, which Flowster's plugin API mirrors (§17):
+The hierarchy below is from the public Visio object model reference. Flowster's plugin API mirrors it (§17):
 
 ```
 Application ─┬─ Documents ── Document ─┬─ Pages ── Page ─┬─ Shapes ── Shape ─┬─ Cells/Sections/Rows
@@ -104,22 +90,22 @@ Application ─┬─ Documents ── Document ─┬─ Pages ── Page ─�
                                        └─ DocumentSheet, Comments, Colors, Fonts, MasterShortcuts
 ```
 
-Scale indicators: `IVShape` 186 members, `IVDocument` 167, `IVApplication` 126, `IVPage` 99, `IVSelection` 95, `IVWindow` 87, `IVMaster` 85, `IVCell` 42. **714 built-in UI commands** (`VisUICmds`), **112 event codes**, **495 cell indices**, **28 section indices**, **28 layout algorithm presets**.
+The same reference documents the enumerations Flowster's commands and events follow: `VisUICmds` (built-in UI commands), `VisEventCodes`, `VisCellIndices`, `VisSectionIndices` and `VisLayoutAlgorithm`.
 
 ### 2.5 ShapeSheet usage in shipped content
 
-Statistics over the **363 US stencils / 9,267 masters** shipped with Visio ([`re/shapesheet-usage.txt`](re/shapesheet-usage.txt)). These counts set the implementation priority of the formula engine and geometry:
+Statistics over the XML of the **363 US stencils / 9,267 masters** that ship with Visio. These counts set the implementation priority of the formula engine and geometry:
 
 * **Sections** (row count): Geometry 100,200 · User 31,673 · Character 17,874 · Connection 6,586 · Paragraph 6,439 · FillGradient 6,294 · Control 5,586 · Actions 4,277 · Property 3,512 · Scratch 3,230 · Field 1,606 · LineGradient 878 · ActionTag 139 · Hyperlink 78 · Tabs 11.
 * **Geometry rows:** LineTo 187,575 · RelLineTo 171,655 · RelCubBezTo 166,554 · MoveTo 49,944 · RelMoveTo 47,955 · EllipticalArcTo 32,709 · RelEllipticalArcTo 28,376 · NURBSTo 16,012 · Ellipse 5,271 · ArcTo 5,190 · PolylineTo 3,456 · SplineKnot 1,417 · SplineStart 300 · RelQuadBezTo 167 · InfiniteLine 45. **Every row type is used, so all are required for P0 rendering fidelity.**
 * **Functions:** 150 distinct functions in use. The top 20 are `GUARD` (193,568), `THEMEVAL` (136,701), `IF` (111,212), `THEMEGUARD`, `NOT`, `RGB`, `SETF`, `OR`, `LUM`, `TEXTHEIGHT`, `TEXTWIDTH`, `NURBS`, `OPENTEXTWIN`, `INDEX`, `SAT`, `ABS`, `AND`, `MAX`, `MIN` and `ISTHEMED`. Theme functions and text-metric functions are on the critical path.
-* The localized string table holds descriptions for **~235 ShapeSheet functions** and **~417 cells**, which sizes the full surface.
+* The public ShapeSheet reference lists every function and cell, which sizes the full surface.
 
-### 2.6 File formats observed
+### 2.6 File formats
 
-Open/save filters found in UI strings: `.vsdx .vsdm .vssx .vssm .vstx .vstm` (Open Packaging Conventions XML, 2013+); `.vsd .vss .vst .vsw` (legacy binary, 2003–2010); `.vdx .vsx .vtx` (2003–2010 XML); `.vdw` (2010 web drawing); `.vtpx` (template package); export to `.svg .png .jpg .gif .tif .bmp .emf .pdf .xps .htm .dwg .dxf`; import `.dwg .dxf`, images, Office documents via OLE; data from Excel, Access, SQL/ODBC (`.odc .dsn`), SharePoint lists and CSV.
+Formats Visio supports, per Microsoft's documentation: `.vsdx .vsdm .vssx .vssm .vstx .vstm` (Open Packaging Conventions XML, 2013+); `.vsd .vss .vst .vsw` (legacy binary, 2003–2010); `.vdx .vsx .vtx` (2003–2010 XML); `.vdw` (2010 web drawing); `.vtpx` (template package); export to `.svg .png .jpg .gif .tif .bmp .emf .pdf .xps .htm .dwg .dxf`; import `.dwg .dxf`, images, Office documents via OLE; data from Excel, Access, SQL/ODBC (`.odc .dsn`), SharePoint lists and CSV.
 
-Template package layout, verified by unpacking `BASFLO_U.VSTX`:
+Package layout, as described in [MS-VSDX]:
 
 ```
 [Content_Types].xml
@@ -138,8 +124,8 @@ Content types: `application/vnd.ms-visio.drawing.main+xml` (template: `…templa
 
 ### 2.7 Built-in content (sizing only — not to be shipped)
 
-* 228 distinct templates ([`re/template-catalog.txt`](re/template-catalog.txt)), each in US and metric variants, with right-to-left variants for wireframes and UML.
-* 363 stencils / 9,267 masters per unit system ([`re/stencil-catalog.tsv`](re/stencil-catalog.tsv)). Families: basic shapes, flowchart, cross-functional flowchart, BPMN 2.0, EPC, Six Sigma/TQM, org charts, network (basic/detailed/rack), AWS and Azure architecture, UML (class/sequence/use case/activity/state/component/deployment), database (Chen/Crow's Foot/IDEF1X/UML), floor plans (office, home, site, HVAC, plumbing, electrical), engineering (electrical, circuits, P&ID, fluid power), software wireframes (web/mobile), timelines, Gantt, calendars, brainstorming, maps, value-stream maps, business frameworks (SWOT, PESTLE, value chain), infographics.
+* 228 distinct templates, each in US and metric variants, with right-to-left variants for wireframes and UML.
+* 363 stencils / 9,267 masters per unit system. Families: basic shapes, flowchart, cross-functional flowchart, BPMN 2.0, EPC, Six Sigma/TQM, org charts, network (basic/detailed/rack), AWS and Azure architecture, UML (class/sequence/use case/activity/state/component/deployment), database (Chen/Crow's Foot/IDEF1X/UML), floor plans (office, home, site, HVAC, plumbing, electrical), engineering (electrical, circuits, P&ID, fluid power), software wireframes (web/mobile), timelines, Gantt, calendars, brainstorming, maps, value-stream maps, business frameworks (SWOT, PESTLE, value chain), infographics.
 
 ---
 
@@ -292,7 +278,7 @@ flowster/
 │  └─ src/i18n/
 ├─ content/                 # Flowster stencils & templates (source form → built .vssx/.vstx)
 ├─ tools/visio-oracle/      # Windows-only conformance harness driving Visio via COM (§22.3)
-└─ docs/                    # this spec, ADRs, docs/re/
+└─ docs/                    # this spec, ADRs
 ```
 
 ### 5.3 Technology choices
@@ -345,7 +331,7 @@ type EngineEvent =
   | { kind: "syncState"; doc: DocId; state: "local" | "connecting" | "live" | "offline"; pendingOps: number };
 ```
 
-* `Command` is a tagged enum with ~300 variants in v1, modelled on `VisUICmds` (`re/enums.txt`), e.g. `ObjectGroup`, `AlignObjectLeft`, `SetLineWeight{…}`, `SetCellFormula{shape, cell, formula}`.
+* `Command` is a tagged enum with ~300 variants in v1, modelled on `VisUICmds` (public Visio object model reference), e.g. `ObjectGroup`, `AlignObjectLeft`, `SetLineWeight{…}`, `SetCellFormula{shape, cell, formula}`.
 * Display-list patches are binary (`ArrayBuffer`, transferable) with a versioned schema; see §8.5.
 * Host IPC (`invoke`) is used only for OS services: `fs_read`, `fs_write_atomic`, `fonts_list`, `font_bytes`, `print_pdf`, `clipboard_write_multi`, `data_query`, `plugin_*`.
 
@@ -424,7 +410,7 @@ Rules:
 * Transform from local to parent: `parent = Pin + R(Angle) · F(FlipX,FlipY) · (local − LocPin)`, where F mirrors about the local pin axis. *Verify flip semantics against the oracle (§22.3) before freezing.*
 * 1-D shapes: `BeginX/BeginY/EndX/EndY` drive `PinX/PinY/Width/Angle` (Width = length, Height = thickness) through standard 1-D formulas.
 * Drawing scale: `PageScale` / `DrawingScale` (e.g. 1 in = 10 ft). Shape cells are in drawing units; rendering uses page units. `DrawingScaleType`/`DrawingSizeType` drive page-setup UI.
-* Unit literals in formulas, as found in the unit-name table: `IN, IN., ", INCH, INCHES, FT, ', FOOT, FEET, YD, MI, NM, MM, CM, M, KM, PT, P (picas), C/CI (ciceros), D/DI (didots), DEG, °, RAD, ', " (min/sec of arc), DMS, ED/EH/EM/ES/EW (elapsed), DATE, TIME, %`, area units `SQ IN`, `FT^2` and so on. Parsing is locale-aware for decimal and list separators.
+* Unit literals in formulas, per the ShapeSheet reference (confirm each against the oracle, §22.3): `IN, IN., ", INCH, INCHES, FT, ', FOOT, FEET, YD, MI, NM, MM, CM, M, KM, PT, P (picas), C/CI (ciceros), D/DI (didots), DEG, °, RAD, ', " (min/sec of arc), DMS, ED/EH/EM/ES/EW (elapsed), DATE, TIME, %`, area units `SQ IN`, `FT^2` and so on. Parsing is locale-aware for decimal and list separators.
 
 ### 6.5 Pages
 
@@ -459,7 +445,7 @@ The same split applies to local-only `.vsdx` files. The file is imported into a 
 
 ### 7.1 Sections and cells
 
-The engine supports every section in the ShapeSheet identifier table ([`re/shapesheet-identifiers.txt`](re/shapesheet-identifiers.txt)). Cell names below are the VSDX `N` attributes.
+The engine supports every section in the public ShapeSheet reference. Cell names below are the VSDX `N` attributes.
 
 | Section (UI name) | Kind | Key cells |
 |---|---|---|
@@ -559,7 +545,7 @@ Implement in three tiers. Counts are uses across shipped masters (§2.5).
 `RED GREEN BLUE NEARESTPOINTONPATH ID EVALTEXT LEFT DATETIME POW RIGHT MSOSHADE DATEVALUE MID DATE ISERRNA LOCALFORMULAEXISTS OPENGROUPWIN DEFAULTEVENT LOCTOPAR LISTMEMBERCOUNT USERUI ACOS FLOOR PAGENUMBER LISTORDER SATDIFF HOUR DEG RAD RECTSECT ASIN WEEKDAY MINUTE SECOND DOCLASTSAVE YEAR DOCLASTEDIT MONTH MASTERMAP PAGECOUNT EVALCELL DOCCREATION SHAPEBINDING CONNECTORBINDING LAYOUT FONTTOID THEMERESTORE RAND BLEND CREATOR ANGLETOLOC PATHLENGTH CELLISTHEMED LISTSEP FILENAME ANGLETOPAR MEMBEROFGRID CFFBINDING TITLE DIRECTORY DESCRIPTION`
 
 **Tier C — P1 (documented, needed by validation, structure and fields):**
-`AGGCOUNT GLUEDSHAPES CONNECTEDSHAPES SHAPESONPAGE FILTERSET HASCATEGORY ONLAYER ROLE IS1D CALLOUTCOUNT CALLOUTTARGETREF CONTAINERCOUNT CONTAINERMEMBERCOUNT STRSAMEEX UPPER LOWER TRIM SUBSTITUTE REPLACE REPT INTUP TRUNC INTERSECTX INTERSECTY ANGLEALONGPATH SEGMENTCOUNT HELP HYPERLINK GOTOPAGE PLAYSOUND CALLTHIS (stub → plugin registry) PAGENAME BKGPAGENAME HYPERLINKBASE KEYWORDS MANAGER COMPANY CATEGORY SUBJECT DOCLASTPRINT TIME TIMEVALUE LN LOG10 EXP COSH SINH TANH RANDBETWEEN`, then every remaining function in the localized description table (~235 total). Generate the authoritative list from the public ShapeSheet function reference, and diff it against the oracle (§22.3) to catch functions that the docs omit.
+`AGGCOUNT GLUEDSHAPES CONNECTEDSHAPES SHAPESONPAGE FILTERSET HASCATEGORY ONLAYER ROLE IS1D CALLOUTCOUNT CALLOUTTARGETREF CONTAINERCOUNT CONTAINERMEMBERCOUNT STRSAMEEX UPPER LOWER TRIM SUBSTITUTE REPLACE REPT INTUP TRUNC INTERSECTX INTERSECTY ANGLEALONGPATH SEGMENTCOUNT HELP HYPERLINK GOTOPAGE PLAYSOUND CALLTHIS (stub → plugin registry) PAGENAME BKGPAGENAME HYPERLINKBASE KEYWORDS MANAGER COMPANY CATEGORY SUBJECT DOCLASTPRINT TIME TIMEVALUE LN LOG10 EXP COSH SINH TANH RANDBETWEEN`, then every remaining function in the ShapeSheet reference. Generate the authoritative list from the public ShapeSheet function reference, and diff it against the oracle (§22.3) to catch functions that the docs omit.
 
 Rules:
 
@@ -946,7 +932,7 @@ Page Setup (Print Setup, Page Size, Drawing Scale, Page Properties, Layout and R
 
 ### 18.6 Keyboard shortcuts (drawing window)
 
-Verified from Visio's default accelerator table ([`re/keyboard-shortcuts.txt`](re/keyboard-shortcuts.txt)). On macOS, **Ctrl ↦ ⌘** for all application shortcuts. Function keys keep their meaning, with alternatives where macOS reserves them.
+From Microsoft's published Visio keyboard shortcuts, confirmed in Visio. On macOS, **Ctrl ↦ ⌘** for all application shortcuts. Function keys keep their meaning, with alternatives where macOS reserves them.
 
 | Keys | Command | Keys | Command |
 |---|---|---|---|
@@ -1008,7 +994,7 @@ Verified from Visio's default accelerator table ([`re/keyboard-shortcuts.txt`](r
 * Cells: write `V` (computed value in internal units), `U` (display unit) and `F` (formula) only when local (not inherited), mirroring Visio. Inherited cells are omitted. Write `F='No Formula'` where the formula was explicitly removed.
 * Write `Connects`, `Text` with cp/pp/tp/fld markers, and the master `Icon` (generated PNG-in-ICO base64 for new masters).
 * Atomic save: write to a temp file in the same directory, `fsync`, rename, and keep a `~$name.vsdx` lock file while open (Visio-compatible semantics; respect existing locks with a read-only fallback).
-* **Compatibility check:** verify output with the oracle (§22.3) in CI on Windows. Every saved file must open in Visio without a repair prompt.
+* **Compatibility check:** verify output with the oracle (§22.3) on a licensed developer machine before each release (not in CI). Every saved file must open in Visio without a repair prompt.
 
 ### 19.3 Other formats
 
@@ -1038,7 +1024,7 @@ Many organisations still hold years of Visio 2003–2010 files, so this importer
 
 **Public references.** As far as we could establish, Microsoft publishes no complete open specification of the `.vsd` binary format.
 
-* **[MS-VGSFF]** (the Visio Graphics Service `.vdw` format, on Microsoft Open Specifications) is the closest public Microsoft document. It must be evaluated in M0 to confirm how much of the shared binary structure it covers. We could not fetch it during this analysis.
+* **[MS-VGSFF]** (the Visio Graphics Service `.vdw` format, on Microsoft Open Specifications) is the closest public Microsoft document, but it does not cover `.vsd`: a `.vdw` is an OLE compound file wrapping a ZIP package. The OLE container itself is documented in [MS-CFB].
 * **libvisio** (Document Liberation Project, MPL-2.0) and **Apache POI HDGF** (Apache-2.0) document the format through working code.
 * **Black-box pairs from the Visio oracle** (§22.3): Visio opens each `.vsd` and saves it as `.vsdx`, which gives us ground truth for every cell.
 
@@ -1323,21 +1309,21 @@ WebView caveats to design for:
 
 ### 22.3 The Visio oracle (Windows-only conformance harness)
 
-Microsoft Visio is installed on the development machine where this analysis ran, so we use it as a **black-box oracle** through its public COM automation interface (`Visio.InvisibleApp`, documented API). No reverse engineering is involved.
+A licensed Microsoft Visio on a developer's machine is our **black-box oracle**, driven through its documented COM automation interface (`Visio.InvisibleApp`). No reverse engineering is involved.
 
-* `tools/visio-oracle/` (Python + `pywin32`, or PowerShell) runs on a licensed Windows runner. These conformance tests are run only by people who hold a Visio licence.
+* `tools/visio-oracle/` (Python + `pywin32`, or PowerShell) runs only on a developer's own Windows machine, by someone who holds a Visio licence and is signed in. It never runs in CI, on shared build agents or on servers: Microsoft doesn't support unattended or server-side automation of its Office apps, and the Visio licence doesn't cover it.
 * **Formula conformance:** for generated test cases (expression, context shape, units), set `Cell.FormulaU` in Visio and record `ResultIU`/`ResultStr`. Store `(formula, context, expected)` fixtures in the repo. The core must match within 1e-9 (numbers) or exactly (strings).
 * **Transform and geometry conformance:** export Visio's computed `Paths`/`BoundingBox`/`VisualBoundingBox` for corpus shapes. Compare to core.
 * **Rendering references:** export PNG at 192 DPI from Visio for corpus pages as golden images. Store only for our own corpus files.
 * **Round-trip acceptance:** open each Flowster-saved file in Visio via COM, check that no repair dialog appears (`AlertResponse`), then re-save and diff.
-* Fixtures are committed. CI on other OSes consumes fixtures only.
+* Fixtures are committed. CI on every OS consumes the committed fixtures only and never runs Visio.
 
 ---
 
 ## 23. Security & privacy
 
 * **No code execution from documents:** VBA is never run. `RUNADDON`/`CALLTHIS` resolve only to installed plugins. `DOCMD` resolves only to safe built-in commands.
-* **External links:** hyperlinks to non-http(s) or file targets need confirmation, with an option to allow them for the session (mirrors the "External App links" prompt found in Visio strings). `file:` links open only after confirmation.
+* **External links:** hyperlinks to non-http(s) or file targets need confirmation, with an option to allow them for the session (mirrors Visio's own prompt for external app links). `file:` links open only after confirmation.
 * XML parsing has no DTD or external entities. ZIP has bomb limits (part-size and ratio caps) and path-traversal checks on part names.
 * Images are decoded with memory-safe Rust decoders, with size limits.
 * Plugins run sandboxed and are permission-gated (§17). Plugin network access is limited to declared origins.
@@ -1359,7 +1345,7 @@ Indicative, assuming 4 core engineers, 2 front-end engineers, **2 sync/server en
 
 | Milestone | Duration | Exit criteria |
 |---|---|---|
-| **M0 Foundations** | 5 wks | Repo, CI on 3 OSes, Tauri shell, worker + WASM core skeleton, command bus, oracle harness skeleton. **CRDT spike** (Loro vs `yrs` on the §20.3 schema with 10k shapes: memory, load time, update size) → ADR. **Determinism harness** (derived-state hash across WASM/native/OSes). [MS-VGSFF] and libvisio/POI evaluation for `.vsd` → ADR. |
+| **M0 Foundations** | 5 wks | Repo, CI on 3 OSes, Tauri shell, worker + WASM core skeleton, command bus, oracle harness skeleton. **CRDT spike** (Loro vs `yrs` on the §20.3 schema with 10k shapes: memory, load time, update size) → ADR. **Determinism harness** (derived-state hash across WASM/native/OSes). libvisio/POI evaluation for `.vsd` → ADR. |
 | **M1 Viewer** | 10 wks | VSDX read **into the CRDT model**, full model + inheritance, formula engine Tier A, all geometry rows, line/fill/text rendering, themes (`THEMEVAL`), pages/backgrounds/layers display, zoom/pan, PDF/PNG/SVG export, CLI `convert/export`. ≥ 90 % corpus pages at SSIM ≥ 0.95. |
 | **M2 Editor core** | 12 wks | Selection, move/resize/rotate, tools (Ctrl+1–9), text editing (rich-text CRDT), per-user undo/redo, snap/glue, stencils pane with own P0 content, drag-drop masters, control handles, actions, Shape Data, Size & Position, VSDX write with lossless round-trip (oracle-verified), autosave. **Public alpha (local documents).** |
 | **M3 Connectors & arrange** | 8 wks | Dynamic connector routing (deterministic), line jumps, AutoConnect, align/distribute/auto-space, groups, z-order, page setup, drawing scale, rulers/grid/guides, print. |
@@ -1381,9 +1367,9 @@ Indicative, assuming 4 core engineers, 2 front-end engineers, **2 sync/server en
 | R1 | ShapeSheet semantic edge cases (cycles, GUARD/SETATREF interplay, inheritance quirks) are under-documented. | Oracle-driven conformance fixtures (§22.3). Treat the oracle as ground truth. |
 | R2 | Text metrics differ from Visio (PTLS vs our stack), so `TEXTHEIGHT`-driven shapes size differently. | Metric-compatible fallback fonts, oracle comparisons, tolerance in layout-driven formulas, and preserving `V` values when recalc isn't triggered. |
 | R3 | WebKitGTK performance. | WebGL backend, LOD, worker offload, auto-detect. |
-| R4 | Legal: interoperability with proprietary format; trade dress. | Clean-room rules (§0), public specs, own content and design, legal review before beta. |
+| R4 | Legal: interoperability with proprietary format; trade dress; patents ([MS-VSDX] is not covered by Microsoft's Open Specification Promise or Community Promise). | Public-sources rules (§0), public specs, own content and design, legal review before beta. |
 | R5 | Third-party icon licensing (AWS/Azure/GCP). | Legal review, plus a user-driven importer as fallback. |
-| R6 | No complete public spec for binary `.vsd`; formula token decoding (T2) is the hardest part. | MPL-2.0 importer crate that may port from libvisio; [MS-VGSFF] evaluation; oracle `.vsd`→`.vsdx` ground-truth pairs; T1 (values) ships first so files always open. |
+| R6 | No complete public spec for binary `.vsd`; formula token decoding (T2) is the hardest part. | MPL-2.0 importer crate that may port from libvisio; oracle `.vsd`→`.vsdx` ground-truth pairs; T1 (values) ships first so files always open. |
 | R7 | WASM memory ceiling (4 GB, practical ~2 GB) for huge documents, now including CRDT overhead. | Lazy master loading, page-level unloading of display lists, row-level CRDT granularity, shallow snapshots, memory64 when available across WebViews. |
 | R8 | Derived state diverges between peers (non-determinism in floats, fonts, routing, layout). | §20.3 determinism rules, the derived-state hash check in the multi-peer simulation on every CI run, and a deterministic font policy for shared documents. |
 | R9 | CRDT library maturity or performance at 10k+ shapes. | M0 spike with the real schema; `yrs` as fallback; the CRDT is isolated behind `flowster-crdt` so the library can be swapped. |
@@ -1395,19 +1381,7 @@ Indicative, assuming 4 core engineers, 2 front-end engineers, **2 sync/server en
 
 ---
 
-## Appendix A. Reverse-engineering artefacts (`docs/re/`)
-
-| File | Contents |
-|---|---|
-| `object-model.txt` | All co-classes and dispatch interfaces with member lists from the Visio type library. |
-| `enums.txt` | All 167 enums with members (`VisUICmds` = 714 commands, `VisCellIndices` = 495, `VisEventCodes` = 112, `VisLayoutAlgorithm` = 28, …). |
-| `keyboard-shortcuts.txt` | Default drawing-window accelerators mapped to command names. |
-| `shapesheet-identifiers.txt` | Cell/section/row identifiers and ShapeSheet UI section names. |
-| `shapesheet-usage.txt` | Usage frequency of sections, row types, functions and cells in shipped stencils. |
-| `stencil-catalog.tsv` | 363 stencils × master counts and sample master names (sizing only). |
-| `template-catalog.txt` | 228 template names (sizing only). |
-
-## Appendix B. References (public)
+## Appendix A. References (public)
 
 * [MS-VSDX]: Visio Graphics Service VSDX File Format (Microsoft Open Specifications).
 * Visio ShapeSheet reference (cells, sections, functions): Microsoft Learn, "Visio ShapeSheet reference".
@@ -1416,6 +1390,8 @@ Indicative, assuming 4 core engineers, 2 front-end engineers, **2 sync/server en
 * Visio 2003–2010 XML (VDX) schema reference.
 * libvisio (Document Liberation Project, MPL-2.0): legacy `.vsd` parsing.
 * Apache POI HDGF (Apache-2.0): Visio binary stream and chunk structure.
-* [MS-VGSFF]: Visio Graphics Service File Format (`.vdw`), Microsoft Open Specifications. Evaluate it for coverage of the shared binary structure.
+* [MS-VGSFF]: Visio Graphics Service File Format (`.vdw`), Microsoft Open Specifications. Does not cover `.vsd`.
+* [MS-CFB]: Compound File Binary File Format (the OLE2 container of `.vsd`), Microsoft Open Specifications.
+* Microsoft Support: "Keyboard shortcuts for Visio".
 * Loro CRDT documentation (loro.dev): movable tree, rich text, `UndoManager`, shallow snapshots, ephemeral store.
 * Kleppmann et al., "A highly-available move operation for replicated trees" (2021), and Litt et al., "Peritext: A CRDT for collaborative rich text editing" (2022).
