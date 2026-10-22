@@ -20,11 +20,12 @@ const REL_THEME: &str = "http://schemas.openxmlformats.org/officeDocument/2006/r
 /// Media larger than this stay unloaded (drawn as a placeholder).
 const MAX_MEDIA_BYTES: u64 = 32 << 20;
 
-/// The raw theme part of a drawing, kept as an asset so a document stored in
-/// the CRDT can re-read it (`themes` holds the part whole, SPEC §20.3).
-pub fn theme_xml(pkg: &OpcPackage) -> Option<Vec<u8>> {
-    let main = pkg.info.main_part.clone()?;
-    pkg.read_part(&pkg.target_of_type(&main, REL_THEME)?).ok()
+/// The raw theme parts of a drawing, in relationship order, kept as assets so
+/// a document stored in the CRDT can re-read them (`themes` holds each part
+/// whole, SPEC §20.3). The first is the document theme.
+pub fn theme_xmls(pkg: &OpcPackage) -> Vec<Vec<u8>> {
+    let Some(main) = pkg.info.main_part.clone() else { return Vec::new() };
+    pkg.targets_of_type(&main, REL_THEME).iter().filter_map(|p| pkg.read_part(p).ok()).collect()
 }
 
 /// Parses a theme part read by [`theme_xml`].
@@ -72,12 +73,13 @@ pub fn read_document(pkg: &OpcPackage) -> Result<Document, OpcError> {
         }
     }
 
-    if let Some(theme_part) = pkg.target_of_type(&main, REL_THEME) {
+    for theme_part in pkg.targets_of_type(&main, REL_THEME) {
         match pkg.read_part(&theme_part).and_then(|b| dom::parse(&b, &theme_part)) {
-            Ok(root) => doc.theme = Some(crate::theme::parse_theme(&root)),
+            Ok(root) => doc.themes.push(crate::theme::parse_theme(&root)),
             Err(e) => doc.warnings.push(format!("theme: {e}")),
         }
     }
+    doc.theme = doc.themes.first().cloned();
 
     let mut reader = PartReader { pkg, doc: &mut doc };
     if let Some(masters_part) = pkg.target_of_type(&main, REL_MASTERS) {

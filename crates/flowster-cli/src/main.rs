@@ -211,8 +211,12 @@ fn export(file: &PathBuf, out: &PathBuf, page: Option<usize>, dpi: f64) -> Resul
     let ext = out.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
     if ext == "vsdx" {
         let title = out.file_stem().and_then(|s| s.to_str()).unwrap_or("Drawing");
-        let bytes = flowster_vsdx::writer::write_vsdx(&doc, flowster_vsdx::visio::theme_xml(&pkg).as_deref(), title)
-            .map_err(anyhow::Error::msg)?;
+        let bytes = flowster_vsdx::writer::write_vsdx(
+            &doc,
+            &flowster_vsdx::visio::theme_xmls(&pkg).iter().map(Vec::as_slice).collect::<Vec<_>>(),
+            title,
+        )
+        .map_err(anyhow::Error::msg)?;
         std::fs::write(out, bytes).with_context(|| format!("writing {}", out.display()))?;
         println!("{} → {} ({} pages)", file.display(), out.display(), doc.pages.len());
         return Ok(());
@@ -440,11 +444,11 @@ fn crdt_check(files: &[PathBuf]) -> Result<()> {
         let pkg =
             flowster_vsdx::OpcPackage::open(bytes.clone()).with_context(|| format!("opening {}", file.display()))?;
         let model = flowster_vsdx::visio::read_document(&pkg)?;
-        let theme = flowster_vsdx::visio::theme_xml(&pkg);
+        let theme = flowster_vsdx::visio::theme_xmls(&pkg);
         let parse = |b: &[u8]| flowster_vsdx::visio::parse_theme_xml(b);
         let t0 = Instant::now();
         let mut doc = Document::new();
-        doc.import_model(&model, theme.as_deref(), seed_of(&bytes));
+        doc.import_model(&model, &theme, seed_of(&bytes));
         let import_ms = t0.elapsed().as_secs_f64() * 1000.0;
         let snapshot = doc.snapshot();
         let t1 = Instant::now();
@@ -490,9 +494,11 @@ fn save_check(files: &[PathBuf], out: Option<&PathBuf>) -> Result<()> {
         let bytes = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
         let pkg = flowster_vsdx::OpcPackage::open(bytes).with_context(|| format!("opening {}", file.display()))?;
         let mut model = flowster_vsdx::visio::read_document(&pkg)?;
-        let theme = flowster_vsdx::visio::theme_xml(&pkg);
+        let theme = flowster_vsdx::visio::theme_xmls(&pkg);
         let title = file.file_stem().and_then(|s| s.to_str()).unwrap_or("Drawing");
-        let saved = flowster_vsdx::writer::write_vsdx(&model, theme.as_deref(), title).map_err(anyhow::Error::msg)?;
+        let saved =
+            flowster_vsdx::writer::write_vsdx(&model, &theme.iter().map(Vec::as_slice).collect::<Vec<_>>(), title)
+                .map_err(anyhow::Error::msg)?;
         let pkg2 = flowster_vsdx::OpcPackage::open(saved.clone())?;
         let mut back = flowster_vsdx::visio::read_document(&pkg2)?;
         model.warnings.clear();

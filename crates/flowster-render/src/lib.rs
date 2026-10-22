@@ -193,6 +193,13 @@ pub struct Paragraph {
     pub space_after: f64,
     pub indent_left: f64,
     pub indent_first: f64,
+    /// The bullet drawn at the first line's indent (`Bullet` / `BulletStr`), if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bullet: Option<String>,
+    /// Where the first line's text starts after a bullet (`TextPosAfterBullet`,
+    /// inches from the bullet); 0: at the left indent, or just past the bullet.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub text_after_bullet: f64,
     pub runs: Vec<Run>,
 }
 
@@ -275,6 +282,7 @@ pub fn build_page(doc: &Document, index: usize) -> Option<DisplayList> {
         page_shadow: (0.0, 0.0),
         boxes: None,
         depth: 0,
+        theme: None,
     };
     let mut chain: Vec<&Page> = Vec::new();
     let mut next = doc.pages[index].back_page;
@@ -314,6 +322,8 @@ struct Builder<'d> {
     boxes: Option<Vec<ShapeBox>>,
     /// Group nesting of the shape being built (0 = on the page).
     depth: usize,
+    /// The theme of the page or group being built (`None`: no theme).
+    theme: Option<&'d flowster_core::theme::Theme>,
 }
 
 /// A resolved drop shadow, in page inches.
@@ -415,6 +425,13 @@ impl<'d> Builder<'d> {
         // 65534 means "not set" for the variation indices.
         let index = |n: &str| num(n).filter(|v| *v >= 0.0 && *v < 65534.0).unwrap_or(0.0) as usize;
         self.variation = (index("VariationColorIndex"), index("VariationStyleIndex"));
+        // The page's theme: what its shapes use unless they (or their group) pick
+        // another. A page with no ThemeIndex has none, even when the file has
+        // theme parts (some shapes may still use them).
+        self.theme = num("ThemeIndex")
+            .map(|v| v as u32)
+            .filter(|&v| v != flowster_core::model::THEME_INDEX_UNSET)
+            .and_then(|v| self.doc.theme_by_index(v));
         self.calc = Some(Calc::for_page(self.doc, page));
         self.page_shadow = (num("ShdwOffsetX").unwrap_or(0.125), num("ShdwOffsetY").unwrap_or(-0.125));
         let root = Affine::scale(scale, scale);
@@ -423,7 +440,7 @@ impl<'d> Builder<'d> {
         }
     }
 
-    fn on_visible_layer(&self, r: &Resolved<'_>) -> bool {
+    fn on_visible_layer(&self, r: &Resolved<'d>) -> bool {
         let Some(members) = r.v("LayerMember") else { return true };
         let ids: Vec<usize> = members.split(';').filter_map(|s| s.trim().parse().ok()).collect();
         ids.is_empty() || ids.iter().any(|&i| self.layers.get(i).copied().unwrap_or(true))
@@ -433,7 +450,12 @@ impl<'d> Builder<'d> {
         if shape.del || shape.kind == ShapeType::Guide {
             return;
         }
-        let r = Resolved::new(self.doc, shape, parent_master);
+        // The shape's own theme, else its group's (or page's).
+        let theme = match Resolved::new(self.doc, shape, parent_master).own_theme_index() {
+            Some(ix) => self.doc.theme_by_index(ix),
+            None => self.theme,
+        };
+        let r = Resolved::new(self.doc, shape, parent_master).with_theme(theme);
         if !self.on_visible_layer(&r) {
             return;
         }
@@ -480,20 +502,22 @@ impl<'d> Builder<'d> {
         self.geometry(&r, world, w, h);
         let master = r.master();
         self.depth += 1;
+        let outer = std::mem::replace(&mut self.theme, theme);
         for child in r.children() {
             self.shape(child, world, master);
         }
+        self.theme = outer;
         self.depth -= 1;
         self.text(&r, world, w, h);
     }
 
     /// The page's calculator, if it knows this exact shape.
-    fn calc_for(&self, r: &Resolved<'_>) -> Option<&Calc<'d>> {
+    fn calc_for(&self, r: &Resolved<'d>) -> Option<&Calc<'d>> {
         self.calc.as_ref().filter(|c| c.owns(r.shape().id, r.shape()))
     }
 
     /// A numeric single-row cell: the cached value, else computed from its formula.
-    fn cell_num(&self, r: &Resolved<'_>, name: &str) -> Option<f64> {
+    fn cell_num(&self, r: &Resolved<'d>, name: &str) -> Option<f64> {
         if let Some(n) = r.num(name) {
             return Some(n);
         }
@@ -507,7 +531,7 @@ impl<'d> Builder<'d> {
     }
 
     /// Fills geometry cells that have a formula but no cached value.
-    fn compute_missing(&self, r: &Resolved<'_>, sections: &mut [MergedSection]) {
+    fn compute_missing(&self, r: &Resolved<'d>, sections: &mut [MergedSection]) {
         let Some(calc) = self.calc_for(r) else { return };
         for sec in sections {
             for row in &mut sec.rows {
@@ -526,8 +550,8 @@ impl<'d> Builder<'d> {
         }
     }
 
-    fn themer(&self, r: &Resolved<'_>) -> Option<Themer<'d>> {
-        let theme = self.doc.theme.as_ref()?;
+    fn themer(&self, r: &Resolved<'d>) -> Option<Themer<'d>> {
+        let theme = r.theme()?;
         // QuickStyleType 2 = connector; 0 (auto) treats 1-D shapes as connectors.
         let connector = match r.num("QuickStyleType").unwrap_or(0.0) as i64 {
             2 => true,
@@ -539,7 +563,7 @@ impl<'d> Builder<'d> {
     }
 
     /// A colour cell, evaluating `THEMEVAL()` with `themed`.
-    fn color(&self, r: &Resolved<'_>, cell: &str, themed: impl Fn(&Themer<'d>) -> Option<Rgba>, default: Rgba) -> Rgba {
+    fn color(&self, r: &Resolved<'d>, cell: &str, themed: impl Fn(&Themer<'d>) -> Option<Rgba>, default: Rgba) -> Rgba {
         match r.lookup(cell) {
             Lookup::Value(v) => parse_color(v, &self.doc.colors).unwrap_or(default),
             Lookup::Themed => self.themer(r).and_then(|t| themed(&t)).unwrap_or(default),
@@ -548,7 +572,7 @@ impl<'d> Builder<'d> {
     }
 
     /// A numeric cell, evaluating `THEMEVAL()` with `themed`.
-    fn num(&self, r: &Resolved<'_>, cell: &str, themed: impl Fn(&Themer<'d>) -> Option<f64>, default: f64) -> f64 {
+    fn num(&self, r: &Resolved<'d>, cell: &str, themed: impl Fn(&Themer<'d>) -> Option<f64>, default: f64) -> f64 {
         match r.lookup(cell) {
             Lookup::Value(v) => parse_num(v).unwrap_or(default),
             Lookup::Themed => self.themer(r).and_then(|t| themed(&t)).unwrap_or(default),
@@ -556,7 +580,7 @@ impl<'d> Builder<'d> {
         }
     }
 
-    fn geometry(&mut self, r: &Resolved<'_>, world: Affine, w: f64, h: f64) {
+    fn geometry(&mut self, r: &Resolved<'d>, world: Affine, w: f64, h: f64) {
         let mut sections = r.sections("Geometry");
         if sections.is_empty() {
             return;
@@ -652,7 +676,7 @@ impl<'d> Builder<'d> {
 
     /// The fill of a closed shape: modern gradient, legacy gradient, hatch or solid.
     /// `LinePattern` and `LineWeight` (inches) after styles and theme.
-    fn line_pattern_weight(&self, r: &Resolved<'_>) -> (f64, f64) {
+    fn line_pattern_weight(&self, r: &Resolved<'d>) -> (f64, f64) {
         let pattern = self.num(r, "LinePattern", |t| Some(t.line(r).and_then(|l| l.pattern).unwrap_or(1.0)), 1.0);
         let weight = self
             .num(
@@ -666,7 +690,7 @@ impl<'d> Builder<'d> {
     }
 
     /// The resolved format of a shape (what the format controls show).
-    fn format_of(&self, r: &Resolved<'_>, world: Affine, w: f64, h: f64) -> ShapeFormat {
+    fn format_of(&self, r: &Resolved<'d>, world: Affine, w: f64, h: f64) -> ShapeFormat {
         let mut sections = r.sections("Geometry");
         self.compute_missing(r, &mut sections);
         let paths = sections_to_paths(&sections, w, h);
@@ -706,7 +730,7 @@ impl<'d> Builder<'d> {
     }
 
     /// The character format of Character row `ix` (empty text).
-    fn char_run(&self, r: &Resolved<'_>, chars: &[MergedSection], themer: Option<&Themer<'d>>, ix: u32) -> Run {
+    fn char_run(&self, r: &Resolved<'d>, chars: &[MergedSection], themer: Option<&Themer<'d>>, ix: u32) -> Run {
         let v = |cell: &str| r.text_row(chars, "Character", ix, cell);
         let num = |cell: &str| match v(cell) {
             Lookup::Value(s) => parse_num(s),
@@ -739,7 +763,7 @@ impl<'d> Builder<'d> {
         }
     }
 
-    fn fill_paint(&self, r: &Resolved<'_>, world: Affine, w: f64, h: f64) -> Option<Paint> {
+    fn fill_paint(&self, r: &Resolved<'d>, world: Affine, w: f64, h: f64) -> Option<Paint> {
         let pattern =
             self.num(r, "FillPattern", |t| Some(t.fill(r).and_then(|f| f.pattern).unwrap_or(1.0)), 1.0) as i64;
         if pattern == 0 {
@@ -789,7 +813,7 @@ impl<'d> Builder<'d> {
 
     /// Gradient stops from the `FillGradient` section (shape chain, then the
     /// fill style chain), evaluating themed stops against the theme.
-    fn gradient_stops(&self, r: &Resolved<'_>) -> Vec<Stop> {
+    fn gradient_stops(&self, r: &Resolved<'d>) -> Vec<Stop> {
         let secs = r.sections("FillGradient");
         let rows: Vec<(Option<String>, Option<String>, Option<String>)> = match secs.first() {
             Some(sec) => sec
@@ -838,7 +862,7 @@ impl<'d> Builder<'d> {
     }
 
     /// Drop shadow from the shadow cells, the page defaults or the theme's effect style.
-    fn shadow(&self, r: &Resolved<'_>) -> Option<Shadow> {
+    fn shadow(&self, r: &Resolved<'d>) -> Option<Shadow> {
         match r.lookup("ShdwPattern") {
             Lookup::Value(v) if parse_num(v).unwrap_or(0.0) != 0.0 => {
                 let (dx, dy) = match self.num(r, "ShapeShdwType", |_| None, 0.0) as i64 {
@@ -868,7 +892,7 @@ impl<'d> Builder<'d> {
     }
 
     /// Arrowheads at the open ends of a stroked path (`BeginArrow`, `EndArrow`).
-    fn arrows(&self, r: &Resolved<'_>, d: &mut [Seg], stroke: &Stroke) -> Vec<Item> {
+    fn arrows(&self, r: &Resolved<'d>, d: &mut [Seg], stroke: &Stroke) -> Vec<Item> {
         let mut out = Vec::new();
         if d.iter().any(|s| matches!(s, Seg::Z)) {
             return out;
@@ -936,7 +960,7 @@ impl<'d> Builder<'d> {
         out
     }
 
-    fn image(&mut self, r: &Resolved<'_>, world: Affine, w: f64, h: f64) {
+    fn image(&mut self, r: &Resolved<'d>, world: Affine, w: f64, h: f64) {
         let Some(fd) = r.foreign() else { return };
         let media = fd.part.as_deref().and_then(|p| self.doc.media.get(p));
         let mime = media.map(|m| m.content_type.clone()).unwrap_or_else(|| "application/octet-stream".into());
@@ -971,7 +995,7 @@ impl<'d> Builder<'d> {
         });
     }
 
-    fn text(&mut self, r: &Resolved<'_>, world: Affine, w: f64, h: f64) {
+    fn text(&mut self, r: &Resolved<'d>, world: Affine, w: f64, h: f64) {
         let Some(pieces) = r.text() else { return };
         if r.flag("HideText").unwrap_or(false) {
             return;
@@ -992,6 +1016,15 @@ impl<'d> Builder<'d> {
                 space_after: v("SpAfter").unwrap_or(0.0),
                 indent_left: v("IndLeft").unwrap_or(0.0),
                 indent_first: v("IndFirst").unwrap_or(0.0),
+                bullet: {
+                    let custom = match r.text_row(&paras, "Paragraph", ix, "BulletStr") {
+                        Lookup::Value(s) => Some(s.trim_matches('"').to_owned()).filter(|s| !s.is_empty()),
+                        _ => None,
+                    };
+                    // Visio's bullet styles draw a dot unless BulletStr names the glyph.
+                    custom.or_else(|| (v("Bullet").unwrap_or(0.0) >= 1.0).then(|| "•".to_owned()))
+                },
+                text_after_bullet: v("TextPosAfterBullet").unwrap_or(0.0).max(0.0),
                 runs: Vec::new(),
             }
         };

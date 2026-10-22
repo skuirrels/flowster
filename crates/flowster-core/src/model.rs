@@ -188,8 +188,10 @@ pub struct Document {
     /// Document colour table entries beyond the built-in palette (`IX` → `#rrggbb`).
     pub colors: BTreeMap<u32, String>,
     pub default_styles: DefaultStyles,
-    /// The document theme (`None` for "No theme" drawings).
+    /// The document theme (`None` for "No theme" drawings): the first of `themes`.
     pub theme: Option<crate::theme::Theme>,
+    /// Every theme part. Pages and shapes pick one with `ThemeIndex` ([`Document::theme_by_index`]).
+    pub themes: Vec<crate::theme::Theme>,
     /// Media payloads by part name (images referenced by Foreign shapes).
     pub media: BTreeMap<String, Media>,
     /// Non-fatal problems met while reading.
@@ -206,4 +208,16 @@ impl Document {
     pub fn page(&self, id: u32) -> Option<&Page> {
         self.pages.iter().find(|p| p.id == id)
     }
+
+    /// The theme a `ThemeIndex` value selects: 0 is "no theme"; an index no
+    /// theme part declares falls back to the document theme.
+    pub fn theme_by_index(&self, index: u32) -> Option<&crate::theme::Theme> {
+        if index == 0 {
+            return None;
+        }
+        self.themes.iter().find(|t| t.ids.contains(&index)).or(self.theme.as_ref())
+    }
 }
+
+/// `ThemeIndex` and the other scheme indices: 65534 means "not set here".
+pub const THEME_INDEX_UNSET: u32 = 65534;

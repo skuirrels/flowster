@@ -226,5 +226,23 @@ pub fn parse_theme(root: &El) -> Theme {
             })
             .collect();
     }
+    // Each scheme names itself with a `schemeID`; `ThemeIndex` and the other
+    // scheme indices refer to these numbers.
+    let mut ids = Vec::new();
+    collect_scheme_ids(root, &mut ids);
+    ids.sort_unstable();
+    ids.dedup();
+    theme.ids = ids;
     theme
+}
+
+fn collect_scheme_ids(el: &El, out: &mut Vec<u32>) {
+    if el.name == "schemeID"
+        && let Some(id) = el.attr("schemeEnum").and_then(|v| v.parse().ok())
+    {
+        out.push(id);
+    }
+    for c in el.children() {
+        collect_scheme_ids(c, out);
+    }
 }

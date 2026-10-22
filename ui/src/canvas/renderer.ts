@@ -180,6 +180,25 @@ function measure(ctx: CanvasRenderingContext2D, run: Run, text: string): number 
   return ctx.measureText(text).width;
 }
 
+/**
+ * Where a line's text starts (text units): the left indent, and on the first
+ * line the first-line indent, moved past the bullet when there is one (a
+ * hanging indent leaves room for it already).
+ */
+function lineIndent(ctx: CanvasRenderingContext2D, para: Paragraph, first: boolean): number {
+  const u = TEXT_UNITS;
+  if (!first) return para.indentLeft * u;
+  const at = (para.indentFirst + para.indentLeft) * u;
+  if (!para.bullet || !para.runs[0]) return at;
+  if (para.textAfterBullet) return at + para.textAfterBullet * u;
+  return Math.max(para.indentLeft * u, at + 2 * measure(ctx, para.runs[0], para.bullet));
+}
+
+/** Where a first line's bullet goes, relative to where its text starts (text units). */
+function bulletOffset(ctx: CanvasRenderingContext2D, para: Paragraph): number {
+  return (para.indentFirst + para.indentLeft) * TEXT_UNITS - lineIndent(ctx, para, true);
+}
+
 /** Greedy word wrap of one paragraph into lines no wider than `maxW` (text units). */
 function layoutParagraph(ctx: CanvasRenderingContext2D, para: Paragraph, maxW: number): Line[] {
   const lines: Line[] = [];
@@ -193,7 +212,8 @@ function layoutParagraph(ctx: CanvasRenderingContext2D, para: Paragraph, maxW: n
   };
   for (const run of para.runs) {
     // Keep spaces attached to the following word so wrapped lines start clean.
-    const tokens = run.text.split(/(?=\s)/u);
+    // Like Visio, a line may also break after a slash or a dash ("PO/" | "DO").
+    const tokens = run.text.split(/(?=\s)|(?<=[/\-–—])(?=[^\s/\-–—])/u);
     for (const token of tokens) {
       const parts = token.split("\n");
       parts.forEach((part, i) => {
@@ -201,7 +221,7 @@ function layoutParagraph(ctx: CanvasRenderingContext2D, para: Paragraph, maxW: n
         if (!part) return;
         const w = measure(ctx, run, part);
         const line: Line = cur!;
-        const indent = (line.first ? para.indentFirst + para.indentLeft : para.indentLeft) * TEXT_UNITS;
+        const indent = lineIndent(ctx, para, line.first);
         if (line.pieces.length > 0 && line.width + w > maxW - indent) {
           const trimmed = part.replace(/^\s+/u, "");
           cur = newLine();
@@ -249,7 +269,7 @@ function drawText(ctx: CanvasRenderingContext2D, t: TextItem, pageToDevice: Affi
 
   ctx.textBaseline = "alphabetic";
   for (const line of lines) {
-    const indent = (line.first ? line.para.indentFirst + line.para.indentLeft : line.para.indentLeft) * u;
+    const indent = lineIndent(ctx, line.para, line.first);
     const free = maxW - indent - line.width;
     let x = ml + indent + (line.para.align === 2 ? free : line.para.align === 1 ? free / 2 : 0);
     if (t.background && line.width > 0) {
@@ -257,6 +277,12 @@ function drawText(ctx: CanvasRenderingContext2D, t: TextItem, pageToDevice: Affi
       ctx.fillRect(x - 2, y, line.width + 4, line.height);
     }
     const baseline = y + line.ascent;
+    const first = line.para.runs[0];
+    if (line.first && line.para.bullet && first) {
+      setFont(ctx, first);
+      ctx.fillStyle = css(first.color);
+      ctx.fillText(line.para.bullet, x + bulletOffset(ctx, line.para), baseline);
+    }
     for (const p of line.pieces) {
       setFont(ctx, p.run);
       ctx.fillStyle = css(p.run.color);

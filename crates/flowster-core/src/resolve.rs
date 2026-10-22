@@ -141,6 +141,8 @@ pub struct Resolved<'d> {
     chain: Vec<&'d Shape>,
     /// Master that children's `MasterShape` ids refer to.
     master: Option<&'d Master>,
+    /// The theme `THEMEVAL()` reads (`None`: no theme, the plain defaults).
+    theme: Option<&'d crate::theme::Theme>,
 }
 
 const MAX_DEPTH: usize = 16;
@@ -176,7 +178,28 @@ impl<'d> Resolved<'d> {
                 _ => break,
             }
         }
-        Resolved { doc, chain, master }
+        Resolved { doc, chain, master, theme: doc.theme.as_ref() }
+    }
+
+    /// Uses `theme` for `THEMEVAL()` instead of the document theme (the theme
+    /// the shape's page or group, or its own `ThemeIndex`, selects).
+    pub fn with_theme(mut self, theme: Option<&'d crate::theme::Theme>) -> Self {
+        self.theme = theme;
+        self
+    }
+
+    /// The theme `THEMEVAL()` reads for this shape.
+    pub fn theme(&self) -> Option<&'d crate::theme::Theme> {
+        self.theme
+    }
+
+    /// The `ThemeIndex` the shape or its masters set themselves (styles aside),
+    /// if any: the theme applied to this shape in particular.
+    pub fn own_theme_index(&self) -> Option<u32> {
+        self.chain.iter().find_map(|s| {
+            let v = s.sheet.cells.get("ThemeIndex")?.v.as_deref()?.parse::<f64>().ok()? as u32;
+            (v != crate::model::THEME_INDEX_UNSET).then_some(v)
+        })
     }
 
     /// The sheets of the inheritance chain: the shape's own first, then its masters'.
@@ -244,7 +267,7 @@ impl<'d> Resolved<'d> {
 
     /// A single-row cell after inheritance, distinguishing theme-driven values.
     pub fn lookup(&self, cell: &str) -> Lookup<'d> {
-        let themed = self.doc.theme.is_some();
+        let themed = self.theme.is_some();
         let check = |v: Option<&'d str>| -> Option<Lookup<'d>> {
             let v = v?;
             if !is_placeholder(v) {
@@ -380,7 +403,7 @@ impl<'d> Resolved<'d> {
     where
         'd: 'a,
     {
-        let themed = self.doc.theme.is_some();
+        let themed = self.theme.is_some();
         if let Some(v) = merged.first().and_then(|s| s.row(ix)).and_then(|r| r.v.get(cell)) {
             if !is_placeholder(v) {
                 return Lookup::Value(v.as_str());

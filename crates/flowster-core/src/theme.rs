@@ -82,6 +82,9 @@ pub struct StyleSet {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Theme {
     pub name: String,
+    /// The `ThemeIndex` values that select this theme: its parts' `schemeEnum`s
+    /// (one per scheme: colours, fonts, effects, connectors).
+    pub ids: Vec<u32>,
     /// `dk1, lt1, dk2, lt2, accent1…6, hlink, folHlink, bkgnd`.
     pub scheme: BTreeMap<String, Rgba>,
     pub major_font: Option<String>,

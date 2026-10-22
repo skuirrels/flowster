@@ -245,9 +245,9 @@ fn media_content_type(name: &str, stored: &str) -> String {
     .to_owned()
 }
 
-/// Writes `doc` as a `.vsdx` package. `theme_xml` is the theme part as stored;
+/// Writes `doc` as a `.vsdx` package. `theme_xmls` are the theme parts as stored (the document theme first);
 /// `title` goes into the core properties.
-pub fn write_vsdx(doc: &Document, theme_xml: Option<&[u8]>, title: &str) -> Result<Vec<u8>, String> {
+pub fn write_vsdx(doc: &Document, theme_xmls: &[&[u8]], title: &str) -> Result<Vec<u8>, String> {
     let mut parts: Vec<(String, String, Vec<u8>)> = Vec::new(); // (name, content type, bytes)
     let mut doc_rels = Rels::default();
     let mut media_used: Vec<String> = Vec::new();
@@ -338,13 +338,14 @@ pub fn write_vsdx(doc: &Document, theme_xml: Option<&[u8]>, title: &str) -> Resu
     doc_rels.add(REL_PAGES, "pages/pages.xml");
 
     // Theme and media.
-    if let Some(xml) = theme_xml {
+    for (i, xml) in theme_xmls.iter().enumerate() {
+        let name = format!("theme{}.xml", i + 1);
         parts.push((
-            "visio/theme/theme1.xml".into(),
+            format!("visio/theme/{name}"),
             "application/vnd.openxmlformats-officedocument.theme+xml".into(),
             xml.to_vec(),
         ));
-        doc_rels.add(REL_THEME, "theme/theme1.xml");
+        doc_rels.add(REL_THEME, &format!("theme/{name}"));
     }
     for part in &media_used {
         let Some(m) = doc.media.get(part) else { continue };
@@ -445,7 +446,7 @@ mod tests {
     fn the_fixture_round_trips_through_write_and_read() {
         let pkg = crate::OpcPackage::open(crate::fixture::minimal_vsdx()).unwrap();
         let doc = crate::visio::read_document(&pkg).unwrap();
-        let bytes = write_vsdx(&doc, None, "Round trip").unwrap();
+        let bytes = write_vsdx(&doc, &[], "Round trip").unwrap();
         let back = crate::visio::read_document(&crate::OpcPackage::open(bytes).unwrap()).unwrap();
         assert_eq!(back.pages, doc.pages);
         assert_eq!(back.styles, doc.styles);

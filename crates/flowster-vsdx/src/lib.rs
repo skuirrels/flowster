@@ -181,11 +181,17 @@ impl OpcPackage {
 
     /// Target of the first relationship of `rel_type` from `source`.
     pub fn target_of_type(&self, source: &str, rel_type: &str) -> Option<String> {
+        self.targets_of_type(source, rel_type).into_iter().next()
+    }
+
+    /// Every internal part `source` relates to with `rel_type`, in relationship order.
+    pub fn targets_of_type(&self, source: &str, rel_type: &str) -> Vec<String> {
         self.info
             .relationships
             .iter()
-            .find(|r| r.source.eq_ignore_ascii_case(source) && r.rel_type == rel_type && !r.external)
-            .and_then(|r| r.target_part.clone())
+            .filter(|r| r.source.eq_ignore_ascii_case(source) && r.rel_type == rel_type && !r.external)
+            .filter_map(|r| r.target_part.clone())
+            .collect()
     }
 }
 
