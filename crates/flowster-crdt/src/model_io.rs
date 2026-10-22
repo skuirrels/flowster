@@ -345,8 +345,9 @@ pub(crate) fn write_new_shapes(doc: &LoroDoc, page_uuid: &str, shapes: &[Shape],
 }
 
 /// Writes `model` into `doc` (uncommitted) and returns the payloads it refers
-/// to. `theme_xml` is the raw theme part, `seed` makes the uuids (see [`seed_of`]).
-pub fn write_model(doc: &LoroDoc, model: &Model, theme_xml: Option<&[u8]>, seed: u64) -> Assets {
+/// to. `theme_xmls` are the raw theme parts (the document theme first), `seed`
+/// makes the uuids (see [`seed_of`]).
+pub fn write_model(doc: &LoroDoc, model: &Model, theme_xmls: &[Vec<u8>], seed: u64) -> Assets {
     let w = Writer { doc, seed };
     let mut assets = Assets::default();
     let meta = doc.get_map(schema::META);
@@ -369,11 +370,12 @@ pub fn write_model(doc: &LoroDoc, model: &Model, theme_xml: Option<&[u8]>, seed:
             meta.insert(key, uuid(seed, b'y', v, 0)).unwrap();
         }
     }
-    if let Some(xml) = theme_xml {
+    for (i, xml) in theme_xmls.iter().enumerate() {
         let hash = assets.put("application/vnd.openxmlformats-officedocument.theme+xml", xml);
         let mut v: HashMap<String, LoroValue> = HashMap::new();
         v.insert("asset".into(), hash.into());
-        doc.get_map(schema::THEMES).insert(&uuid(seed, b't', 0, 0), v).unwrap();
+        v.insert("order".into(), (i as i64).into());
+        doc.get_map(schema::THEMES).insert(&uuid(seed, b't', i as u32, 0), v).unwrap();
     }
 
     let styles = doc.get_map(schema::STYLES);
@@ -764,15 +766,24 @@ impl Reader<'_> {
     }
 }
 
-/// The theme part the document stores (raw XML), for writing it back out.
-pub fn theme_xml<'a>(doc: &LoroDoc, assets: &'a Assets) -> Option<&'a [u8]> {
-    entries(&doc.get_map(schema::THEMES)).into_iter().find_map(|(_, v)| match v {
-        ValueOrContainer::Value(LoroValue::Map(t)) => match t.get("asset") {
-            Some(LoroValue::String(h)) => assets.blobs.get(h.as_str()).map(|b| b.bytes.as_slice()),
+/// The theme parts the document stores (raw XML), the document theme first,
+/// for writing them back out.
+pub fn theme_xmls<'a>(doc: &LoroDoc, assets: &'a Assets) -> Vec<&'a [u8]> {
+    let mut parts: Vec<(i64, &[u8])> = entries(&doc.get_map(schema::THEMES))
+        .into_iter()
+        .filter_map(|(_, v)| match v {
+            ValueOrContainer::Value(LoroValue::Map(t)) => match (t.get("asset"), t.get("order")) {
+                (Some(LoroValue::String(h)), order) => {
+                    let order = if let Some(LoroValue::I64(o)) = order { *o } else { 0 };
+                    assets.blobs.get(h.as_str()).map(|b| (order, b.bytes.as_slice()))
+                }
+                _ => None,
+            },
             _ => None,
-        },
-        _ => None,
-    })
+        })
+        .collect();
+    parts.sort_by_key(|p| p.0);
+    parts.into_iter().map(|p| p.1).collect()
 }
 
 /// Reads the model back from `doc`. `parse_theme` turns the theme asset into a
@@ -817,14 +828,8 @@ pub fn read_model(doc: &LoroDoc, assets: &Assets, parse_theme: impl Fn(&[u8]) ->
         fill: r.style(&meta, "defaultFillStyle"),
         text: r.style(&meta, "defaultTextStyle"),
     };
-    for (_, v) in entries(&doc.get_map(schema::THEMES)) {
-        if let ValueOrContainer::Value(LoroValue::Map(t)) = v
-            && let Some(LoroValue::String(h)) = t.get("asset")
-            && let Some(blob) = assets.blobs.get(h.as_str())
-        {
-            model.theme = parse_theme(&blob.bytes);
-        }
-    }
+    model.themes = theme_xmls(doc, assets).into_iter().filter_map(&parse_theme).collect();
+    model.theme = model.themes.first().cloned();
 
     for (_, v) in entries(&styles_map) {
         let ValueOrContainer::Container(Container::Map(m)) = v else { continue };
@@ -923,7 +928,7 @@ mod tests {
         let model = flowster_vsdx::visio::read_document(&pkg).unwrap();
         let a = LoroDoc::new();
         a.set_peer_id(1).unwrap();
-        let assets = write_model(&a, &model, None, 1);
+        let assets = write_model(&a, &model, &[], 1);
         a.commit();
         let b = LoroDoc::new();
         b.set_peer_id(2).unwrap();

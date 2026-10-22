@@ -133,8 +133,8 @@ impl Engine {
         // it and render what reads back.
         let warnings = model.as_ref().map(|m| m.warnings.clone()).unwrap_or_default();
         let model = model.map(|m| {
-            let theme = flowster_vsdx::visio::theme_xml(&pkg);
-            doc.import_model(&m, theme.as_deref(), flowster_crdt::model_io::seed_of(bytes));
+            let theme = flowster_vsdx::visio::theme_xmls(&pkg);
+            doc.import_model(&m, &theme, flowster_crdt::model_io::seed_of(bytes));
             let mut back = doc.read_model(flowster_vsdx::visio::parse_theme_xml);
             back.warnings = m.warnings;
             back
@@ -205,7 +205,7 @@ impl Engine {
         }
         let model = &model;
         let title = d.doc.meta().get("title").cloned().unwrap_or_else(|| "Drawing".into());
-        let bytes = flowster_vsdx::writer::write_vsdx(model, d.doc.theme_xml(), &title)?;
+        let bytes = flowster_vsdx::writer::write_vsdx(model, &d.doc.theme_xmls(), &title)?;
         let stem = d.file_name.rsplit_once('.').map_or(d.file_name.as_str(), |(s, _)| s);
         Ok((format!("{stem}.vsdx"), bytes))
     }

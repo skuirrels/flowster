@@ -188,6 +188,10 @@ export interface Paragraph {
   spaceAfter: number;
   indentLeft: number;
   indentFirst: number;
+  /** The bullet at the first line's indent, if any. */
+  bullet?: string;
+  /** Where the first line's text starts after the bullet, inches (absent: at the left indent or past the bullet). */
+  textAfterBullet?: number;
   runs: Run[];
 }
 

@@ -406,6 +406,8 @@ impl Interp<'_> {
                 space_after: 0.0,
                 indent_left: 0.0,
                 indent_first: 0.0,
+                bullet: None,
+                text_after_bullet: 0.0,
                 runs: vec![Run {
                     text: s.to_owned(),
                     font: if font.face.is_empty() { "Arial".into() } else { font.face },

@@ -132,8 +132,13 @@ fn themed_cells_use_the_theme_and_fall_back_without_one() {
     let mut shape = box_shape(1, (5.0, 4.0));
     shape.line_style = Some(6);
     shape.fill_style = Some(6);
+    // The same shape with "no theme" (ThemeIndex 0) set on itself.
+    let mut unthemed = shape.clone();
+    unthemed.id = 2;
+    unthemed.sheet.cells.insert("ThemeIndex".into(), Cell::value("0"));
     let ph = |mods: Vec<(String, f64)>| ColorSpec { base: ColorBase::Scheme("phClr".into()), mods };
     let theme = Theme {
+        ids: vec![34],
         scheme: BTreeMap::from([("accent1".to_string(), Rgba(0x10, 0x80, 0xf0, 255))]),
         shapes: StyleSet {
             fills: vec![FillStyle { color: Some(ph(vec![])), ..Default::default() }],
@@ -147,11 +152,32 @@ fn themed_cells_use_the_theme_and_fall_back_without_one() {
         },
         ..Default::default()
     };
+    // The page applies the theme (ThemeIndex 34, the theme's scheme id).
+    let mut themed_page = page(0, vec![shape, unthemed]);
+    themed_page.sheet.cells.insert("ThemeIndex".into(), Cell::value("34"));
     let mut doc = Document {
-        pages: vec![page(0, vec![shape])],
+        pages: vec![themed_page],
         styles: BTreeMap::from([(6, themed_style), (0, no_style)]),
-        theme: Some(theme),
+        theme: Some(theme.clone()),
+        themes: vec![theme],
         ..Default::default()
+    };
+    let paths = |doc: &Document| -> Vec<(Option<Rgba>, Option<Rgba>)> {
+        build_page(doc, 0)
+            .unwrap()
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Path { fill, stroke, .. } => {
+                    let fill = match fill {
+                        Some(flowster_render::Paint::Solid { color }) => Some(*color),
+                        _ => None,
+                    };
+                    Some((fill, stroke.as_ref().map(|s| s.color)))
+                }
+                _ => None,
+            })
+            .collect()
     };
 
     let dl = build_page(&doc, 0).unwrap();
@@ -160,12 +186,65 @@ fn themed_cells_use_the_theme_and_fall_back_without_one() {
     assert_eq!(stroke, Some(Rgba(0x08, 0x40, 0x78, 255)));
     let Item::Path { stroke: Some(s), .. } = &dl.items[0] else { panic!() };
     assert!((s.width - 25_400.0 / 914_400.0).abs() < 1e-12);
+    // A shape that sets "no theme" on itself falls through to No Style.
+    assert_eq!(paths(&doc)[1], (Some(Rgba::WHITE), Some(Rgba::BLACK)));
+
+    // A page with no ThemeIndex has no theme, though the file has theme parts
+    // (Visio draws such pages unthemed).
+    doc.pages[0].sheet.cells.remove("ThemeIndex");
+    assert_eq!(paths(&doc), vec![(Some(Rgba::WHITE), Some(Rgba::BLACK)); 2]);
 
     // Without a theme, "Themed" falls through to the next style (No Style).
+    doc.pages[0].sheet.cells.insert("ThemeIndex".into(), Cell::value("34"));
     doc.theme = None;
+    doc.themes.clear();
     let dl = build_page(&doc, 0).unwrap();
     let (_, fill, stroke) = first_path(&dl.items);
     assert_eq!((fill, stroke), (Some(Rgba::WHITE), Some(Rgba::BLACK)));
+}
+
+#[test]
+fn a_group_passes_its_theme_to_its_members() {
+    let theme = Theme {
+        ids: vec![37],
+        scheme: BTreeMap::from([("accent1".to_string(), Rgba(0x10, 0x80, 0xf0, 255))]),
+        shapes: StyleSet {
+            fills: vec![FillStyle {
+                color: Some(ColorSpec { base: ColorBase::Scheme("phClr".into()), mods: vec![] }),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let themed_style = StyleSheet {
+        id: 6,
+        sheet: Sheet { cells: cells(&[("FillForegnd", "Themed")]), ..Default::default() },
+        fill_style: Some(0),
+        ..Default::default()
+    };
+    let no_style = StyleSheet {
+        id: 0,
+        sheet: Sheet { cells: cells(&[("FillForegnd", "1")]), ..Default::default() },
+        ..Default::default()
+    };
+    let mut member = box_shape(2, (1.0, 0.5));
+    member.fill_style = Some(6);
+    let mut group = box_shape(1, (5.0, 4.0));
+    group.kind = flowster_core::model::ShapeType::Group;
+    group.sheet.sections.clear();
+    group.sheet.cells.insert("ThemeIndex".into(), Cell::value("37"));
+    group.shapes = vec![member];
+    // The page has no theme: only the group's member is themed.
+    let doc = Document {
+        pages: vec![page(0, vec![group])],
+        styles: BTreeMap::from([(6, themed_style), (0, no_style)]),
+        theme: Some(theme.clone()),
+        themes: vec![theme],
+        ..Default::default()
+    };
+    let (_, fill, _) = first_path(&build_page(&doc, 0).unwrap().items);
+    assert_eq!(fill, Some(Rgba(0x10, 0x80, 0xf0, 255)));
 }
 
 #[test]

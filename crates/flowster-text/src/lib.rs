@@ -146,6 +146,30 @@ impl TextEngine {
             return laid;
         }
         let indent = para.indent_left.max(0.0);
+        // A bullet: laid out on its own in the first run's font, drawn at the
+        // first-line indent; the first line's text then starts at the left
+        // indent (a hanging indent) or just past the bullet.
+        let bullet_at = indent + para.indent_first;
+        let bullet = para.bullet.as_ref().and_then(|b| {
+            let alone = Paragraph {
+                align: 0,
+                indent_left: 0.0,
+                indent_first: 0.0,
+                bullet: None,
+                text_after_bullet: 0.0,
+                space_before: 0.0,
+                space_after: 0.0,
+                runs: vec![flowster_render::Run { text: b.clone(), ..first.clone() }],
+                ..para.clone()
+            };
+            let laid = self.layout_paragraph(&alone, 100.0);
+            laid.lines.into_iter().next().map(|line| (laid.width, line.2))
+        });
+        let first_x = match &bullet {
+            Some(_) if para.text_after_bullet > 0.0 => bullet_at + para.text_after_bullet,
+            Some((width, _)) => indent.max(bullet_at + 2.0 * width),
+            None => bullet_at,
+        };
         let max_w = ((inner_w - indent) * PT).max(1.0) as f32;
         let mut builder = self.layout.ranged_builder(&mut self.fonts, &text, 1.0, false);
         builder.push_default(StyleProperty::FontFamily(family(&first.font)));
@@ -174,7 +198,7 @@ impl TextEngine {
         }
         let mut layout = builder.build(&text);
         // IndFirst moves the first line relative to IndLeft (negative: a hanging indent).
-        layout.set_text_indent((para.indent_first * PT) as f32, IndentOptions::default());
+        layout.set_text_indent(((first_x - indent) * PT) as f32, IndentOptions::default());
         layout.break_all_lines(Some(max_w));
         let alignment = match para.align {
             0 => Alignment::Left,
@@ -242,6 +266,15 @@ impl TextEngine {
             }
             laid.lines.push((top / PT, line_pitch / PT, runs));
             top += line_pitch;
+        }
+        if let (Some((_, runs)), Some(line)) = (bullet, laid.lines.first_mut()) {
+            // Same offset from the text as at the left edge, whatever the alignment.
+            let (text_x, baseline) = line.2.first().map_or((first_x, 0.0), |(_, r)| (r.x, r.baseline));
+            for (face, mut run) in runs.into_iter().rev() {
+                run.x += bullet_at + (text_x - first_x);
+                run.baseline = baseline;
+                line.2.insert(0, (face, run));
+            }
         }
         laid.height = top / PT;
         laid.width = f64::from(layout.width()) / PT + indent;
@@ -324,6 +357,8 @@ mod tests {
             space_after: after_pt / PT,
             indent_left: 0.0,
             indent_first: 0.0,
+            bullet: None,
+            text_after_bullet: 0.0,
             runs: vec![flowster_render::Run {
                 text: text.into(),
                 font: "Calibri".into(),
@@ -370,5 +405,23 @@ mod tests {
         // An absolute SpLine (inches) is used as is.
         let item = block(vec![para("HHH", 36.0, 24.0 / PT, 0.0, 0.0)]);
         assert_eq!(pt(engine.layout_item(&item).unwrap().height), 24.0);
+    }
+
+    #[test]
+    fn a_bullet_hangs_left_of_its_text() {
+        let mut engine = TextEngine::system();
+        let mut p = para("Volume indication", 12.0, -1.2, 0.0, 0.0);
+        p.bullet = Some("•".into());
+        p.indent_left = 0.25;
+        p.indent_first = -0.25;
+        let layout = engine.layout_item(&block(vec![p])).unwrap();
+        if layout.fonts.is_empty() {
+            return;
+        }
+        let bullet = layout.runs.iter().find(|r| r.text == "•").expect("a bullet run");
+        let text = layout.runs.iter().find(|r| r.text.starts_with("Volume")).unwrap();
+        // The bullet sits at the first-line indent; the text at the left indent.
+        assert!((text.x - bullet.x - 0.25).abs() < 0.01, "bullet {} text {}", bullet.x, text.x);
+        assert_eq!(bullet.baseline, text.baseline);
     }
 }

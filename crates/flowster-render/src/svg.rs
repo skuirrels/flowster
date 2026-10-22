@@ -278,16 +278,16 @@ pub fn to_svg_with_layouts(dl: &DisplayList, layouts: &[Option<TextLayout>]) -> 
             Item::Text { transform, width, height, margins, valign, paragraphs, .. } => {
                 let [ml, mr, mt, mb] = *margins;
                 let inner_w = (width - ml - mr).max(0.01);
-                // (paragraph, line pieces as (run index, text), line height)
-                type Line<'p> = (&'p Paragraph, Vec<(usize, String)>, f64);
+                // (paragraph, line pieces as (run index, text), line height, first line)
+                type Line<'p> = (&'p Paragraph, Vec<(usize, String)>, f64, bool);
                 let mut lines: Vec<Line<'_>> = Vec::new();
                 let mut total = 0.0;
                 for p in paragraphs {
-                    for line in wrap(p, inner_w) {
+                    for (i, line) in wrap(p, inner_w).into_iter().enumerate() {
                         let size = line.iter().map(|(ri, _)| p.runs[*ri].size).fold(0.0, f64::max);
                         let lh = if p.line_spacing < 0.0 { size * -p.line_spacing } else { p.line_spacing.max(size) };
                         total += lh;
-                        lines.push((p, line, lh));
+                        lines.push((p, line, lh, i == 0));
                     }
                 }
                 // Text frame: +Y down from the block's top-left.
@@ -300,7 +300,11 @@ pub fn to_svg_with_layouts(dl: &DisplayList, layouts: &[Option<TextLayout>]) -> 
                         _ => (avail - total) / 2.0,
                     };
                 writeln!(out, r#"<g transform="{}">"#, matrix(&frame)).ok();
-                for (p, line, lh) in lines {
+                for (p, mut line, lh, first) in lines {
+                    // Estimated text has no indents: a bullet just leads its first line.
+                    if let (true, Some(b), Some(_)) = (first, &p.bullet, p.runs.first()) {
+                        line.insert(0, (0, format!("{b} ")));
+                    }
                     let line_w: f64 =
                         line.iter().map(|(ri, t)| t.chars().count() as f64 * p.runs[*ri].size * AVG_ADVANCE).sum();
                     let x = match p.align {

@@ -62,7 +62,7 @@ impl Document {
     pub fn new_drawing(title: &str) -> Self {
         let mut d = Self::new();
         d.doc.get_map(schema::META).insert("title", title).unwrap();
-        d.import_model(&crate::edit::blank_model(), None, model_io::seed_of(title.as_bytes()));
+        d.import_model(&crate::edit::blank_model(), &[], model_io::seed_of(title.as_bytes()));
         d
     }
 
@@ -81,16 +81,16 @@ impl Document {
     /// Writes a model read from a file into the CRDT, in one transaction that
     /// is not undoable. `theme_xml` is the file's theme part; `seed` derives
     /// the uuids ([`model_io::seed_of`] of the file's bytes).
-    pub fn import_model(&mut self, model: &Model, theme_xml: Option<&[u8]>, seed: u64) {
-        let assets = model_io::write_model(&self.doc, model, theme_xml, seed);
+    pub fn import_model(&mut self, model: &Model, theme_xmls: &[Vec<u8>], seed: u64) {
+        let assets = model_io::write_model(&self.doc, model, theme_xmls, seed);
         self.assets.blobs.extend(assets.blobs);
         self.doc.set_next_commit_origin(IMPORT_ORIGIN);
         self.doc.commit();
     }
 
-    /// The stored theme part, if the drawing has one.
-    pub fn theme_xml(&self) -> Option<&[u8]> {
-        model_io::theme_xml(&self.doc, &self.assets)
+    /// The stored theme parts, the document theme first.
+    pub fn theme_xmls(&self) -> Vec<&[u8]> {
+        model_io::theme_xmls(&self.doc, &self.assets)
     }
 
     /// The model as the CRDT holds it now (what the engine renders).
@@ -561,9 +561,9 @@ mod tests {
         let bytes = flowster_vsdx::fixture::minimal_vsdx();
         let pkg = flowster_vsdx::OpcPackage::open(bytes.clone()).unwrap();
         let model = flowster_vsdx::visio::read_document(&pkg).unwrap();
-        let theme = flowster_vsdx::visio::theme_xml(&pkg);
+        let theme = flowster_vsdx::visio::theme_xmls(&pkg);
         let mut d = Document::new();
-        d.import_model(&model, theme.as_deref(), model_io::seed_of(&bytes));
+        d.import_model(&model, &theme, model_io::seed_of(&bytes));
         assert!(!d.undo_state().can_undo, "import must not be undoable");
 
         let parse = |b: &[u8]| flowster_vsdx::visio::parse_theme_xml(b);
