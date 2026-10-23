@@ -1111,21 +1111,37 @@ kbd {
   overflow-y: auto;
 }
 
-.keys-table {
-  width: 100%;
-  border-collapse: collapse;
+.dialog.wide {
+  width: min(1040px, calc(100% - 32px));
 }
 
-.keys-table td {
+/* Keyboard shortcuts, flowing down three columns (fewer on a narrow window). */
+.keys-grid {
+  margin: 0;
+  columns: 3 260px;
+  column-gap: 32px;
+}
+
+.keys-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 7px 0;
   border-bottom: 1px solid var(--border);
+  break-inside: avoid;
 }
 
-.keys-table td:last-child {
-  text-align: right;
+.keys-row dt,
+.keys-row dd {
+  margin: 0;
 }
 
-.keys-table kbd {
+.keys-row dd {
+  flex: none;
+}
+
+.keys-grid kbd {
   display: inline-block;
   padding: 2px 7px;
   font-size: 11.5px;

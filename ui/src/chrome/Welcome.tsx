@@ -85,7 +85,18 @@ export const SHORTCUTS: [string, string][] = [
   ["Cancel / deselect", "Esc"],
 ];
 
-export function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+export function Dialog({
+  title,
+  onClose,
+  wide,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  /** Landscape, for content laid out in columns. */
+  wide?: boolean;
+  children: React.ReactNode;
+}) {
   useEffect(() => {
     const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", key);
@@ -93,7 +104,7 @@ export function Dialog({ title, onClose, children }: { title: string; onClose: (
   }, [onClose]);
   return (
     <div className="scrim" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog" role="dialog" aria-modal="true" aria-label={title}>
+      <div className={wide ? "dialog wide" : "dialog"} role="dialog" aria-modal="true" aria-label={title}>
         <header>
           <h2>{title}</h2>
           <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
@@ -108,19 +119,18 @@ export function Dialog({ title, onClose, children }: { title: string; onClose: (
 
 export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
   return (
-    <Dialog title="Keyboard shortcuts" onClose={onClose}>
-      <table className="keys-table">
-        <tbody>
-          {SHORTCUTS.map(([what, keys]) => (
-            <tr key={what}>
-              <td>{what}</td>
-              <td>
-                <kbd>{shortcut(keys)}</kbd>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <Dialog title="Keyboard shortcuts" onClose={onClose} wide>
+      {/* In columns, so the whole list fits without scrolling. */}
+      <dl className="keys-grid">
+        {SHORTCUTS.map(([what, keys]) => (
+          <div className="keys-row" key={what}>
+            <dt>{what}</dt>
+            <dd>
+              <kbd>{shortcut(keys)}</kbd>
+            </dd>
+          </div>
+        ))}
+      </dl>
     </Dialog>
   );
 }

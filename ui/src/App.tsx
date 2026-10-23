@@ -136,6 +136,8 @@ export function App({ engine }: { engine: EngineClient }) {
   const [doc, setDoc] = useState<OpenDoc | null>(null);
   const [page, setPage] = useState(0);
   const [dl, setDl] = useState<DisplayList | null>(null);
+  /** The document `dl` belongs to: the canvas starts afresh, fitted, for each one. */
+  const [dlDoc, setDlDoc] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("drawing");
   const [zoom, setZoom] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -222,6 +224,7 @@ export function App({ engine }: { engine: EngineClient }) {
       .then((list) => {
         if (cancelled) return;
         setDl(list);
+        setDlDoc(docId);
         // Drop selected shapes that no longer exist (deleted, undone).
         setSelection((sel) => sel.filter((id) => list.shapes.some((b) => b.id === id)));
       })
@@ -270,6 +273,8 @@ export function App({ engine }: { engine: EngineClient }) {
       setDirty(false);
       setSavedAs(null);
       setSaveHandle(handle);
+      // A drawing opens fitted to the window, whatever the last one's zoom was.
+      setAutoFit(true);
       setDoc({ open, pkg, info, pages });
       setMode(pages.length > 0 ? "drawing" : "package");
       setHash(derived.hash);
@@ -1221,6 +1226,7 @@ export function App({ engine }: { engine: EngineClient }) {
             <div className="canvas-wrap">
               {dl ? (
                 <CanvasView
+                  key={dlDoc ?? undefined}
                   ref={canvas}
                   dl={dl}
                   tool={tool}
