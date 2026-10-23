@@ -6,6 +6,22 @@ Add each change under **Unreleased** as it lands. When you `make bump`, rename t
 
 ## Unreleased
 
+## 0.1.3 — 2026-10-23
+
+See [release-notes/0.1.3.md](release-notes/0.1.3.md) for the user-facing notes.
+
+### Fixed
+
+- The page tabs at the bottom of the window no longer show scrollbars that clipped the tab names. The tabs scroll with the mouse wheel or trackpad, the current page's tab stays in view, the insert-page button stays pinned beside them, and the status items on the right are no longer cut off.
+
+## 0.1.2 — 2026-10-23
+
+### Fixed
+
+- The macOS app is ad-hoc signed, so Gatekeeper no longer reports the download as damaged.
+
+## 0.1.1 — 2026-10-22
+
 ### Added
 
 - Help ▸ About ▸ **Third-party licences** lists every open-source component Flowster ships, with its licence text. `scripts/third-party-notices.mjs` generates the list during each installer build.
@@ -14,6 +30,11 @@ Add each change under **Unreleased** as it lands. When you `make bump`, rename t
 
 - The spec (`docs/SPEC.md`) now draws on public Microsoft documentation and the Visio oracle only. It no longer describes analysing Visio's program files.
 - The Visio oracle runs only on a licensed developer machine, never in CI. CI uses the committed fixtures.
+
+### Fixed
+
+- Drawings with several themes take each page's or shape's own theme, so text that came out white on white (missing headings, labels and table rows) now shows in its proper colours.
+- Paragraph bullets are drawn on screen and in PDF, PNG and SVG export, and lines may break after a slash or a dash, as in Visio.
 
 ## 0.1.0 — 2026-10-21
 
