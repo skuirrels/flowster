@@ -10,6 +10,10 @@ Add each change under **Unreleased** as it lands. When you `make bump`, rename t
 
 See [release-notes/0.1.3.md](release-notes/0.1.3.md) for the user-facing notes.
 
+### Added
+
+- Holding Space over the canvas shows a grab hand, and the hand closes while you drag to pan. In a text field or while editing a shape's text, Space types a space as before.
+
 ### Fixed
 
 - The page tabs at the bottom of the window no longer show scrollbars that clipped the tab names. The tabs scroll with the mouse wheel or trackpad, the current page's tab stays in view, the insert-page button stays pinned beside them, and the status items on the right are no longer cut off.

@@ -544,21 +544,32 @@ export function CanvasView({
     return () => canvas.removeEventListener("wheel", onWheel);
   }, [setView, zoomAt]);
 
-  // Space held = pan with the left button.
+  // Space held = pan with the left button, shown by a grab hand. In a text field a space is typed.
   useEffect(() => {
+    const typing = (t: EventTarget | null) =>
+      t instanceof HTMLTextAreaElement || t instanceof HTMLInputElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable);
+    const release = () => {
+      if (!space.current) return;
+      space.current = false;
+      // The next pointer move restores the hover cursor; a pan in progress keeps its hand until it ends.
+      if (gesture.current?.kind !== "pan" && canvasRef.current) canvasRef.current.style.cursor = "default";
+    };
     const down = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !(e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement)) {
-        space.current = true;
-      }
+      if (e.code !== "Space" || space.current || typing(e.target)) return;
+      space.current = true;
+      if (canvasRef.current && !gesture.current) canvasRef.current.style.cursor = "grab";
     };
     const up = (e: KeyboardEvent) => {
-      if (e.code === "Space") space.current = false;
+      if (e.code === "Space") release();
     };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
+    // Switching away while space is held never delivers its keyup.
+    window.addEventListener("blur", release);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", release);
     };
   }, []);
 
@@ -587,6 +598,7 @@ export function CanvasView({
     if (e.button === 1 || space.current) {
       manual.current();
       gesture.current = { kind: "pan", x: e.clientX, y: e.clientY };
+      e.currentTarget.style.cursor = "grabbing";
       return;
     }
     // The rulers are not part of the drawing.
@@ -659,6 +671,10 @@ export function CanvasView({
     const p = toPage(v, H, sp);
     pointer.current = sp;
     if (!g) {
+      if (space.current) {
+        canvas.style.cursor = "grab";
+        return;
+      }
       // Hover feedback: arrows, connector targets, cursors.
       const one = tool === "select" && sel.current.length === 1 ? boxOf(sel.current[0]) : null;
       if (one && !isOneD(one) && overRotate(one, sp)) {
@@ -710,6 +726,7 @@ export function CanvasView({
     gesture.current = null;
     const target = hover.current;
     hover.current = null;
+    if (g?.kind === "pan" && canvasRef.current) canvasRef.current.style.cursor = space.current ? "grab" : "default";
     if (!v || !g) return;
     const px = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]) * v.zoom;
     if (g.kind === "move" && px(g.start, g.cur) > CLICK / 2) {
@@ -812,7 +829,8 @@ export function CanvasView({
           draw();
         }
       }}
-      onPointerCancel={() => {
+      onPointerCancel={(e) => {
+        if (gesture.current?.kind === "pan") e.currentTarget.style.cursor = space.current ? "grab" : "default";
         gesture.current = null;
         draw();
       }}
