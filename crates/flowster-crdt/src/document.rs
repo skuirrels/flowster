@@ -20,7 +20,8 @@ const MAX_UNDO_STEPS: usize = 100;
 
 pub struct Document {
     doc: LoroDoc,
-    undo: UndoManager,
+    /// Made by the first command (see [`Document::undo`]).
+    undo: Option<UndoManager>,
     undo_labels: Vec<String>,
     redo_labels: Vec<String>,
     assets: Assets,
@@ -41,16 +42,21 @@ impl Default for Document {
     }
 }
 
+/// The undo manager for `doc`: commands only, never imports.
+fn undo_manager(doc: &LoroDoc) -> UndoManager {
+    let mut undo = UndoManager::new(doc);
+    undo.set_max_undo_steps(MAX_UNDO_STEPS);
+    undo.add_exclude_origin_prefix(IMPORT_ORIGIN);
+    undo
+}
+
 impl Document {
     pub fn new() -> Self {
         let doc = LoroDoc::new();
         model_io::configure(&doc);
-        let mut undo = UndoManager::new(&doc);
-        undo.set_max_undo_steps(MAX_UNDO_STEPS);
-        undo.add_exclude_origin_prefix(IMPORT_ORIGIN);
         Document {
             doc,
-            undo,
+            undo: None,
             undo_labels: Vec::new(),
             redo_labels: Vec::new(),
             assets: Assets::default(),
@@ -86,6 +92,15 @@ impl Document {
         self.assets.blobs.extend(assets.blobs);
         self.doc.set_next_commit_origin(IMPORT_ORIGIN);
         self.doc.commit();
+    }
+
+    /// The undo manager, made on first use. Once anything observes a Loro
+    /// document, every commit records a change event; for a whole drawing
+    /// that costs more than writing it (3.9 s of 5.8 s for 77 000 shapes),
+    /// so a drawing is imported before the undo manager starts observing.
+    fn undo(&mut self) -> &mut UndoManager {
+        let doc = &self.doc;
+        self.undo.get_or_insert_with(|| undo_manager(doc))
     }
 
     /// The stored theme parts, the document theme first.
@@ -157,6 +172,8 @@ impl Document {
 impl CommandTarget for Document {
     fn exec(&mut self, cmd: &Command) -> Result<ChangeSummary, CommandError> {
         let mut changes = ChangeSummary::default();
+        // Observing from here on, so this command's commit is undoable.
+        self.undo();
         match cmd {
             Command::SetDocProp { key, value } => {
                 self.doc
@@ -224,7 +241,7 @@ impl CommandTarget for Document {
                 self.redo_labels.clear();
             }
             Command::Undo => {
-                if self.undo.undo().map_err(|e| CommandError::Failed(e.to_string()))? {
+                if self.undo().undo().map_err(|e| CommandError::Failed(e.to_string()))? {
                     if let Some(l) = self.undo_labels.pop() {
                         self.redo_labels.push(l);
                     }
@@ -232,7 +249,7 @@ impl CommandTarget for Document {
                 }
             }
             Command::Redo => {
-                if self.undo.redo().map_err(|e| CommandError::Failed(e.to_string()))? {
+                if self.undo().redo().map_err(|e| CommandError::Failed(e.to_string()))? {
                     if let Some(l) = self.redo_labels.pop() {
                         self.undo_labels.push(l);
                     }
@@ -245,8 +262,8 @@ impl CommandTarget for Document {
 
     fn undo_state(&self) -> UndoState {
         UndoState {
-            can_undo: self.undo.can_undo(),
-            can_redo: self.undo.can_redo(),
+            can_undo: self.undo.as_ref().is_some_and(UndoManager::can_undo),
+            can_redo: self.undo.as_ref().is_some_and(UndoManager::can_redo),
             labels: self.undo_labels.iter().rev().cloned().collect(),
         }
     }
@@ -572,6 +589,21 @@ mod tests {
         // A fresh replica from the snapshot reads the same model.
         let copy = Document::from_snapshot(&d.snapshot(), d.assets().clone()).unwrap();
         assert_eq!(copy.read_model(parse), expected);
+    }
+
+    #[test]
+    fn a_drawing_is_imported_before_anything_observes_the_document() {
+        // With an observer, Loro records a change event for the whole import,
+        // which made opening a large drawing take seconds longer.
+        let mut d = Document::new();
+        d.import_model(&crate::edit::blank_model(), &[], 1);
+        assert!(d.undo.is_none(), "the undo manager must not exist during the import");
+        assert!(!d.undo_state().can_undo);
+        // The first command starts it, and that command is undoable.
+        d.exec(&Command::SetDocProp { key: "title".into(), value: "Renamed".into() }).unwrap();
+        assert!(d.undo_state().can_undo);
+        d.exec(&Command::Undo).unwrap();
+        assert!(d.meta().get("title").is_none_or(|t| t != "Renamed"));
     }
 
     #[test]

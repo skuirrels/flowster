@@ -6,6 +6,14 @@ Add each change under **Unreleased** as it lands. When you `make bump`, rename t
 
 ## Unreleased
 
+### Added
+
+- While a file opens, the window shows "Opening <file name>…" with a spinner instead of appearing to do nothing.
+
+### Changed
+
+- Large drawings open about twice as fast: a 34-page drawing with 77,000 shapes now opens in under 5 seconds instead of about 9. The undo history now starts after the drawing is loaded, so the load no longer records a change event for every shape.
+
 ### Fixed
 
 - Text on the canvas stays lined up with its shapes after the first redraw. The selection overlay left the canvas set to centre text, so from the second frame on every word was drawn centred on its own position: words in table cells overlapped or spread apart, centred labels slid left out of their boxes, and rotated swimlane labels moved along their bands and were cut off at the edge.

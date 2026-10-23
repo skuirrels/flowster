@@ -471,6 +471,44 @@ kbd {
   flex-direction: column;
 }
 
+/* While a file opens. Shown after a short delay, so quick opens don't flash. */
+.opening {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: color-mix(in srgb, var(--app) 72%, transparent);
+  color: var(--text-2);
+  font-size: 13px;
+  cursor: progress;
+  animation: fade 150ms ease-out 200ms both;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2.5px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2400ms;
+  }
+}
+
 .stage {
   flex: 1;
   min-height: 0;
