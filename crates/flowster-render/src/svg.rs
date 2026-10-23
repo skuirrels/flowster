@@ -1,8 +1,9 @@
 //! SVG export of a display list (SPEC §19.3). Coordinates are page inches with
 //! +Y up, so the whole drawing sits in a group that flips Y.
 //!
-//! Text uses an estimated advance width (no font metrics in core yet), so line
-//! breaks can differ from the canvas until core text layout lands.
+//! Without laid-out text ([`to_svg_with_layouts`]), lines break at an estimated
+//! advance width, so breaks can differ from the canvas; each line is anchored
+//! by its alignment, so the viewer's font places it.
 
 use std::fmt::Write as _;
 
@@ -305,15 +306,15 @@ pub fn to_svg_with_layouts(dl: &DisplayList, layouts: &[Option<TextLayout>]) -> 
                     if let (true, Some(b), Some(_)) = (first, &p.bullet, p.runs.first()) {
                         line.insert(0, (0, format!("{b} ")));
                     }
-                    let line_w: f64 =
-                        line.iter().map(|(ri, t)| t.chars().count() as f64 * p.runs[*ri].size * AVG_ADVANCE).sum();
-                    let x = match p.align {
-                        0 | 3 => ml,
-                        2 => width - mr - line_w,
-                        _ => ml + (inner_w - line_w) / 2.0,
+                    // The width is only estimated, so the viewer anchors the line
+                    // with its own font: centred and right-aligned text stays put.
+                    let (x, anchor) = match p.align {
+                        0 | 3 => (ml, ""),
+                        2 => (width - mr, r#" text-anchor="end""#),
+                        _ => (ml + inner_w / 2.0, r#" text-anchor="middle""#),
                     };
                     let baseline = y + lh * 0.8;
-                    write!(out, r#"<text x="{x:.5}" y="{baseline:.5}" xml:space="preserve">"#).ok();
+                    write!(out, r#"<text x="{x:.5}" y="{baseline:.5}"{anchor} xml:space="preserve">"#).ok();
                     for (ri, t) in &line {
                         let r = &p.runs[*ri];
                         write!(

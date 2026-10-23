@@ -14,7 +14,7 @@ KIT := node scripts/release-kit/release.mjs
 
 ## make setup            install dependencies
 ## make dev              run the app in development mode
-## make test             Rust tests (with the desktop host), type check and the determinism check
+## make test             Rust tests (with the desktop host), type check, UI tests and the determinism check
 ## make version          this checkout's version and what's published for each platform
 ## make bump             set the next version (published + 1, or VERSION=x.y.z), then commit it
 ## make installers       build this OS's installers into release/VERSION/
@@ -37,7 +37,7 @@ dev:
 	pnpm tauri dev
 
 test check:
-	pnpm build:wasm && pnpm build && cargo test --workspace && pnpm typecheck && pnpm determinism
+	pnpm build:wasm && pnpm build && cargo test --workspace && pnpm typecheck && pnpm test:ui && pnpm determinism
 
 version:
 	$(KIT) version

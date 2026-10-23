@@ -217,6 +217,8 @@ export function hitArrow(arrows: Arrow[], [x, y]: Pt): Direction | null {
 const ACCENT = "#0d8a7a";
 
 export function drawOverlay(ctx: CanvasRenderingContext2D, view: View, dpr: number, pageHeight: number, o: Overlay) {
+  // The labels centre their text; keep that out of the next frame's drawing.
+  ctx.save();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const s = (p: Pt) => toScreen(view, pageHeight, p);
   ctx.lineWidth = 1;
@@ -335,6 +337,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, view: View, dpr: numb
     if (len > 24) pill(ctx, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, m.label, GUIDE);
   }
   if (o.readout) pill(ctx, o.readout.at[0], o.readout.at[1], o.readout.text, ACCENT);
+  ctx.restore();
 }
 
 /** A label on a rounded coloured background, centred on (x, y). */

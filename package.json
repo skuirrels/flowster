@@ -12,6 +12,7 @@
     "build": "pnpm --filter flowster-ui build",
     "notices": "node scripts/third-party-notices.mjs",
     "typecheck": "pnpm --filter flowster-ui typecheck",
+    "test:ui": "pnpm --filter flowster-ui test",
     "determinism": "node scripts/determinism-check.mjs",
     "spike": "node scripts/crdt-spike.mjs",
     "tauri": "tauri"

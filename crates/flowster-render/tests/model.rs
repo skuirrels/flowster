@@ -414,3 +414,42 @@ fn gradients_patterns_and_shadows() {
     };
     assert_eq!(d[0], Seg::M { x: 7.1, y: 1.4 });
 }
+
+#[test]
+fn svg_export_anchors_lines_by_their_alignment() {
+    // A centred pill label, a right-aligned cell and a left-aligned one. The SVG
+    // export only estimates text widths, so it must leave the placement of
+    // centred and right-aligned lines to the viewer's font.
+    let labelled = |id: u32, pin: (f64, f64), align: &str, text: &str| {
+        let mut s = box_shape(id, pin);
+        for (k, v) in [("LeftMargin", "0.1"), ("RightMargin", "0.1")] {
+            s.sheet.cells.insert(k.into(), Cell::value(v));
+        }
+        s.sheet.sections.push(Section {
+            n: "Paragraph".into(),
+            rows: vec![Row { ix: Some(0), cells: cells(&[("HorzAlign", align)]), ..Default::default() }],
+            ..Default::default()
+        });
+        s.text = Some(vec![TextPiece::Text(text.into())]);
+        s
+    };
+    let shapes = vec![
+        labelled(1, (2.0, 6.0), "1", "Colibra (tbc)"),
+        labelled(2, (5.0, 6.0), "2", "CargoWrite"),
+        labelled(3, (8.0, 6.0), "0", "Value Stream"),
+    ];
+    let doc = Document { pages: vec![page(0, shapes)], ..Default::default() };
+    let svg = flowster_render::svg::to_svg(&build_page(&doc, 0).unwrap());
+    let text_line = |needle: &str| {
+        let line = svg.lines().find(|l| l.contains(needle)).unwrap_or_else(|| panic!("no {needle} in\n{svg}"));
+        let x = line.split("<text x=\"").nth(1).and_then(|s| s.split('"').next()).unwrap().to_owned();
+        (x, line.to_owned())
+    };
+    // Block frame: the 2 in wide box with 0.1 in margins.
+    let (x, line) = text_line("Colibra");
+    assert_eq!((x.as_str(), line.contains(r#"text-anchor="middle""#)), ("1.00000", true), "{line}");
+    let (x, line) = text_line("CargoWrite");
+    assert_eq!((x.as_str(), line.contains(r#"text-anchor="end""#)), ("1.90000", true), "{line}");
+    let (x, line) = text_line("Value");
+    assert_eq!((x.as_str(), line.contains("text-anchor")), ("0.10000", false), "{line}");
+}

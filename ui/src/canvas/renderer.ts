@@ -267,7 +267,11 @@ function drawText(ctx: CanvasRenderingContext2D, t: TextItem, pageToDevice: Affi
   const avail = h - mt - mb;
   let y = mt + (t.valign === 0 ? 0 : t.valign === 2 ? avail - total : (avail - total) / 2);
 
+  // The layout above positions every piece by its left edge; set that here
+  // rather than trust what the last frame's overlay left in the context.
   ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
+  ctx.direction = "ltr";
   for (const line of lines) {
     const indent = lineIndent(ctx, line.para, line.first);
     const free = maxW - indent - line.width;
