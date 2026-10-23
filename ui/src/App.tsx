@@ -136,6 +136,8 @@ export function App({ engine }: { engine: EngineClient }) {
   const [mode, setMode] = useState<Mode>("drawing");
   const [zoom, setZoom] = useState(0);
   const [busy, setBusy] = useState(false);
+  /** The file being opened, while it loads (a large drawing takes a few seconds). */
+  const [opening, setOpening] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [undo, setUndo] = useState<UndoInfo>({ canUndo: false, canRedo: false, labels: [] });
   const [sync, setSync] = useState<SyncState | null>(null);
@@ -327,6 +329,7 @@ export function App({ engine }: { engine: EngineClient }) {
   const openFile = useCallback(
     async (file: PickedFile) => {
       setBusy(true);
+      setOpening(file.fileName);
       setError(null);
       try {
         if (doc) await engine.close(doc.open.doc);
@@ -336,6 +339,7 @@ export function App({ engine }: { engine: EngineClient }) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
         setBusy(false);
+        setOpening(null);
       }
     },
     [doc, engine, showDoc],
@@ -1125,7 +1129,13 @@ export function App({ engine }: { engine: EngineClient }) {
         </div>
       )}
 
-      <main className="workspace">
+      <main className="workspace" aria-busy={opening !== null}>
+        {opening && (
+          <div className="opening" role="status">
+            <span className="spinner" aria-hidden="true" />
+            <span>Opening {opening}…</span>
+          </div>
+        )}
         {error && (
           <div className="banner error" role="alert">
             <Icon name="info" size={16} />
