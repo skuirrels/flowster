@@ -6,6 +6,10 @@ Add each change under **Unreleased** as it lands. When you `make bump`, rename t
 
 ## Unreleased
 
+## 0.1.4 — 2026-10-23
+
+See [release-notes/0.1.4.md](release-notes/0.1.4.md) for the user-facing notes.
+
 ### Added
 
 - While a file opens, the window shows "Opening <file name>…" with a spinner instead of appearing to do nothing.
