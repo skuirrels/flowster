@@ -799,13 +799,28 @@ kbd {
 
 .page-tabs {
   display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-left: 6px;
+}
+
+/* The tabs scroll; the insert and hidden-pages buttons stay put beside them. */
+.page-strip {
+  display: flex;
   min-width: 0;
   overflow-x: auto;
-  padding-left: 6px;
+  overflow-y: hidden;
+  /* A scrollbar would eat the bar's 30px; the strip scrolls by wheel or trackpad. */
+  scrollbar-width: none;
+}
+
+.page-strip::-webkit-scrollbar {
+  display: none;
 }
 
 .page-tabs button {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 6px;
   padding: 0 12px;
@@ -860,6 +875,7 @@ kbd {
 
 .status-items {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 16px;
   padding-right: 12px;

@@ -186,6 +186,12 @@ export function App({ engine }: { engine: EngineClient }) {
   /** Bumped after every change so the page is fetched again. */
   const [version, setVersion] = useState(0);
   const canvas = useRef<CanvasHandle>(null);
+  const pageTabs = useRef<HTMLDivElement>(null);
+
+  // Keep the current page's tab in view when the strip overflows.
+  useEffect(() => {
+    pageTabs.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [page, doc?.pages.length]);
 
   useEffect(
     () =>
@@ -1232,52 +1238,63 @@ export function App({ engine }: { engine: EngineClient }) {
 
       {doc && (
         <footer className="statusbar">
-          <div className="page-tabs" role="tablist" aria-label="Pages">
-            {doc.pages
-              .filter((p) => !p.hidden || p.index === page)
-              .map((p) =>
-                renaming === p.index ? (
-                  <input
-                    key={p.id}
-                    className="page-rename"
-                    aria-label="Page name"
-                    defaultValue={p.name}
-                    autoFocus
-                    onFocus={(e) => e.currentTarget.select()}
-                    onBlur={(e) => {
-                      const name = e.currentTarget.value.trim();
-                      setRenaming(null);
-                      if (name && name !== p.name) void exec({ kind: "renamePage", page: p.index, name });
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") e.currentTarget.blur();
-                      else if (e.key === "Escape") {
-                        e.currentTarget.value = p.name;
-                        e.currentTarget.blur();
-                      }
-                    }}
-                  />
-                ) : (
-                  <button
-                    type="button"
-                    role="tab"
-                    key={p.id}
-                    aria-selected={p.index === page}
-                    className={[p.background && "background", p.hidden && "hidden"].filter(Boolean).join(" ") || undefined}
-                    onClick={() => showPage(p.index)}
-                    onDoubleClick={() => setRenaming(p.index)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      showPage(p.index);
-                      setPageMenu({ page: p.index, at: [e.clientX, e.clientY] });
-                    }}
-                    title={[p.background && "Background page", p.hidden && "Hidden page"].filter(Boolean).join(" · ") || undefined}
-                  >
-                    <Icon name={p.hidden ? "eyeOff" : "page"} size={14} />
-                    {p.name}
-                  </button>
-                ),
-              )}
+          <div className="page-tabs">
+            <div
+              className="page-strip"
+              role="tablist"
+              aria-label="Pages"
+              ref={pageTabs}
+              onWheel={(e) => {
+                // The strip has no scrollbar; a mouse wheel scrolls it sideways.
+                if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY;
+              }}
+            >
+              {doc.pages
+                .filter((p) => !p.hidden || p.index === page)
+                .map((p) =>
+                  renaming === p.index ? (
+                    <input
+                      key={p.id}
+                      className="page-rename"
+                      aria-label="Page name"
+                      defaultValue={p.name}
+                      autoFocus
+                      onFocus={(e) => e.currentTarget.select()}
+                      onBlur={(e) => {
+                        const name = e.currentTarget.value.trim();
+                        setRenaming(null);
+                        if (name && name !== p.name) void exec({ kind: "renamePage", page: p.index, name });
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                        else if (e.key === "Escape") {
+                          e.currentTarget.value = p.name;
+                          e.currentTarget.blur();
+                        }
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      role="tab"
+                      key={p.id}
+                      aria-selected={p.index === page}
+                      className={[p.background && "background", p.hidden && "hidden"].filter(Boolean).join(" ") || undefined}
+                      onClick={() => showPage(p.index)}
+                      onDoubleClick={() => setRenaming(p.index)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        showPage(p.index);
+                        setPageMenu({ page: p.index, at: [e.clientX, e.clientY] });
+                      }}
+                      title={[p.background && "Background page", p.hidden && "Hidden page"].filter(Boolean).join(" · ") || undefined}
+                    >
+                      <Icon name={p.hidden ? "eyeOff" : "page"} size={14} />
+                      {p.name}
+                    </button>
+                  ),
+                )}
+            </div>
             <button
               type="button"
               className="page-add"
