@@ -6,6 +6,11 @@ Add each change under **Unreleased** as it lands. When you `make bump`, rename t
 
 ## Unreleased
 
+### Fixed
+
+- Text on the canvas stays lined up with its shapes after the first redraw. The selection overlay left the canvas set to centre text, so from the second frame on every word was drawn centred on its own position: words in table cells overlapped or spread apart, centred labels slid left out of their boxes, and rotated swimlane labels moved along their bands and were cut off at the edge.
+- Centred and right-aligned text in SVG exports is anchored by its alignment, so it stays centred or right-aligned in the viewer's font instead of being placed by an estimated width.
+
 ## 0.1.3 — 2026-10-23
 
 See [release-notes/0.1.3.md](release-notes/0.1.3.md) for the user-facing notes.
