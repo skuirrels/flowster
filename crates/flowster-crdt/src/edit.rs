@@ -23,11 +23,15 @@ fn failed(e: impl std::fmt::Display) -> CommandError {
     CommandError::Failed(e.to_string())
 }
 
-/// A new, blank drawing: one US Letter landscape page.
+/// A new, blank drawing: one US Letter landscape page that grows by sheets
+/// of Letter as shapes reach past it (Auto Size), as in Visio.
 pub fn blank_model() -> Model {
     let mut sheet = Sheet::default();
     for (name, v) in [("PageWidth", "11"), ("PageHeight", "8.5"), ("PageScale", "1"), ("DrawingScale", "1")] {
         sheet.cells.insert(name.into(), Cell { v: Some(v.into()), f: None, u: Some("IN".into()) });
+    }
+    for (name, v) in [("PaperKind", "1"), ("PrintPageOrientation", "2"), ("DrawingResizeType", "1")] {
+        sheet.cells.insert(name.into(), Cell { v: Some(v.into()), f: None, u: None });
     }
     Model {
         pages: vec![Page {
@@ -47,6 +51,44 @@ fn v(value: impl Into<String>) -> Cell {
 
 fn bit(b: bool) -> Cell {
     v(if b { "1" } else { "0" })
+}
+
+fn inches(x: f64) -> Cell {
+    Cell { v: Some(format_num(x)), f: None, u: Some("IN".into()) }
+}
+
+/// The page sizes a user can set, in inches.
+const PAGE_SIZES: std::ops::RangeInclusive<f64> = 0.25..=2000.0;
+
+/// The space Fit to Drawing leaves around the shapes, in inches.
+const FIT_MARGIN: f64 = 0.25;
+
+/// `DrawingResizeType` values: grow and shrink with the shapes, or never.
+const AUTO_SIZE: &str = "1";
+const NO_AUTO_SIZE: &str = "2";
+
+fn page_num(page: &Page, name: &str) -> Option<f64> {
+    page.sheet.cell(name).and_then(|c| c.v.as_deref()).and_then(flowster_core::value::parse_num)
+}
+
+/// Drawing units → paper inches (`PageScale` / `DrawingScale`).
+fn page_scale(page: &Page) -> f64 {
+    match (page_num(page, "PageScale"), page_num(page, "DrawingScale")) {
+        (Some(p), Some(d)) if d.abs() > 1e-12 && p.abs() > 1e-12 => p / d,
+        _ => 1.0,
+    }
+}
+
+/// The page's top-level shapes' bounds in paper inches: `[x0, y0, x1, y1]`.
+fn drawing_extent(model: &Model, page: usize) -> Option<[f64; 4]> {
+    let scale = page_scale(model.pages.get(page)?);
+    model.pages[page].shapes.iter().filter_map(|s| shape_rect(model, page, s.id)).fold(None, |acc, r| {
+        let b = [r.cx - r.hw, r.cy - r.hh, r.cx + r.hw, r.cy + r.hh].map(|v| v * scale);
+        Some(match acc {
+            None => b,
+            Some([x0, y0, x1, y1]) => [x0.min(b[0]), y0.min(b[1]), x1.max(b[2]), y1.max(b[3])],
+        })
+    })
 }
 
 /// Edits run against one document.
@@ -1036,6 +1078,135 @@ impl Editor<'_> {
         Self::put_cells(&lazy_map(&m, "pageSheet"), &[("UIVisibility", bit(hidden))])?;
         Ok(ChangeSummary { page: Some(next.unwrap_or(page)), ..Default::default() })
     }
+    // ------------------------------------------------------------- page setup
+
+    /// Sets the paper size; the orientation follows it.
+    pub fn set_page_size(&mut self, page: usize, width: f64, height: f64, paper: Option<u32>) -> Result<ChangeSummary> {
+        if !PAGE_SIZES.contains(&width) || !PAGE_SIZES.contains(&height) {
+            return Err(failed(format!(
+                "a page is {} to {} inches on each side",
+                PAGE_SIZES.start(),
+                PAGE_SIZES.end()
+            )));
+        }
+        if let Some(kind) = paper.filter(|&k| flowster_core::paper::paper_size(k).is_none()) {
+            return Err(failed(format!("unknown paper size {kind}")));
+        }
+        let m = self.doc.get_map(schema::page_key(&self.page_uuid(page)?));
+        let mut cells = vec![
+            ("PageWidth", inches(width)),
+            ("PageHeight", inches(height)),
+            ("PrintPageOrientation", v(if width > height { "2" } else { "1" })),
+        ];
+        match paper {
+            Some(kind) => cells.push(("PaperKind", v(kind.to_string()))),
+            None => cells.push(("DrawingResizeType", v(NO_AUTO_SIZE))),
+        }
+        Self::put_cells(&lazy_map(&m, "pageSheet"), &cells)?;
+        Ok(ChangeSummary { page: Some(page), ..Default::default() })
+    }
+
+    /// Portrait or landscape: swaps width and height if they need it, and
+    /// turns the printer paper too.
+    pub fn set_page_orientation(&mut self, page: usize, landscape: bool) -> Result<ChangeSummary> {
+        let model = model_io::read_model(self.doc, &model_io::Assets::default(), |_| None);
+        let p = model.pages.get(page).ok_or_else(|| failed(format!("no page {page}")))?;
+        let (w, h) = (page_num(p, "PageWidth").unwrap_or(8.5), page_num(p, "PageHeight").unwrap_or(11.0));
+        let mut cells = vec![("PrintPageOrientation", v(if landscape { "2" } else { "1" }))];
+        if (w > h) != landscape && w != h {
+            cells.push(("PageWidth", inches(h)));
+            cells.push(("PageHeight", inches(w)));
+        }
+        let m = self.doc.get_map(schema::page_key(&self.page_uuid(page)?));
+        Self::put_cells(&lazy_map(&m, "pageSheet"), &cells)?;
+        Ok(ChangeSummary { page: Some(page), ..Default::default() })
+    }
+
+    /// Fits the page around the shapes with a margin, moving them in by it,
+    /// and turns Auto Size off so the page stays that size.
+    pub fn fit_page_to_drawing(&mut self, page: usize) -> Result<ChangeSummary> {
+        let model = model_io::read_model(self.doc, &model_io::Assets::default(), |_| None);
+        let p = model.pages.get(page).ok_or_else(|| failed(format!("no page {page}")))?;
+        let [x0, y0, x1, y1] =
+            drawing_extent(&model, page).ok_or_else(|| failed("there are no shapes to fit the page to"))?;
+        let (dx, dy) = (FIT_MARGIN - x0, FIT_MARGIN - y0);
+        let (w, h) = (x1 - x0 + 2.0 * FIT_MARGIN, y1 - y0 + 2.0 * FIT_MARGIN);
+        let scale = page_scale(p);
+        self.move_all(&model, page, dx / scale, dy / scale)?;
+        let m = self.doc.get_map(schema::page_key(&self.page_uuid(page)?));
+        Self::put_cells(
+            &lazy_map(&m, "pageSheet"),
+            &[
+                ("PageWidth", inches(w.clamp(*PAGE_SIZES.start(), *PAGE_SIZES.end()))),
+                ("PageHeight", inches(h.clamp(*PAGE_SIZES.start(), *PAGE_SIZES.end()))),
+                ("PrintPageOrientation", v(if w > h { "2" } else { "1" })),
+                ("DrawingResizeType", v(NO_AUTO_SIZE)),
+            ],
+        )?;
+        let moved = (dx.abs() > 1e-9 || dy.abs() > 1e-9).then_some((dx, dy));
+        Ok(ChangeSummary { page: Some(page), moved, ..Default::default() })
+    }
+
+    pub fn set_page_auto_size(&mut self, page: usize, on: bool) -> Result<ChangeSummary> {
+        let m = self.doc.get_map(schema::page_key(&self.page_uuid(page)?));
+        Self::put_cells(
+            &lazy_map(&m, "pageSheet"),
+            &[("DrawingResizeType", v(if on { AUTO_SIZE } else { NO_AUTO_SIZE }))],
+        )?;
+        Ok(ChangeSummary { page: Some(page), ..Default::default() })
+    }
+
+    /// Auto Size, after an edit: the page becomes the fewest whole sheets of
+    /// its paper that hold the shapes, always including the first sheet at the
+    /// origin. It grows and shrinks on the right and top; shapes past the left
+    /// or bottom edge add sheets there, which moves every shape by whole
+    /// sheets, and that move is returned (paper inches). Does nothing unless
+    /// the page has Auto Size on.
+    pub fn auto_size(&mut self, page: usize) -> Result<Option<(f64, f64)>> {
+        let model = model_io::read_model(self.doc, &model_io::Assets::default(), |_| None);
+        let Some(p) = model.pages.get(page) else { return Ok(None) };
+        if p.background || page_num(p, "DrawingResizeType") != Some(1.0) {
+            return Ok(None);
+        }
+        let size = (page_num(p, "PageWidth").unwrap_or(8.5), page_num(p, "PageHeight").unwrap_or(11.0));
+        let kind = page_num(p, "PaperKind").map(|k| k as u32);
+        let orientation = page_num(p, "PrintPageOrientation").map(|o| o as u32);
+        let (tw, th) = flowster_core::paper::sheet(kind, orientation, size);
+        // Sheets [first, last) along an axis, from the origin's sheet or before
+        // it; a shape touching a sheet's edge stays on it.
+        const EPS: f64 = 1e-6;
+        let span = |lo: f64, hi: f64, step: f64| {
+            let first = (lo / step + EPS).floor().min(0.0);
+            let last = (hi / step - EPS).ceil().max(1.0);
+            (first, last - first)
+        };
+        let ((cx, cols), (cy, rows)) = match drawing_extent(&model, page) {
+            Some([x0, y0, x1, y1]) => (span(x0, x1, tw), span(y0, y1, th)),
+            None => ((0.0, 1.0), (0.0, 1.0)),
+        };
+        let (w, h) = (cols * tw, rows * th);
+        if (w - size.0).abs() > 1e-6 || (h - size.1).abs() > 1e-6 {
+            let m = self.doc.get_map(schema::page_key(&self.page_uuid(page)?));
+            Self::put_cells(&lazy_map(&m, "pageSheet"), &[("PageWidth", inches(w)), ("PageHeight", inches(h))])?;
+        }
+        let (dx, dy) = (-cx * tw, -cy * th);
+        if dx == 0.0 && dy == 0.0 {
+            return Ok(None);
+        }
+        let scale = page_scale(p);
+        self.move_all(&model, page, dx / scale, dy / scale)?;
+        Ok(Some((dx, dy)))
+    }
+
+    /// Moves every top-level shape on a page by `(dx, dy)` drawing units.
+    fn move_all(&mut self, model: &Model, page: usize, dx: f64, dy: f64) -> Result<()> {
+        let moves: Vec<_> = model.pages[page].shapes.iter().map(|s| (s.id, dx, dy)).collect();
+        if !moves.is_empty() {
+            self.translate(page, &moves)?;
+        }
+        Ok(())
+    }
+
     // -------------------------------------------------------------- clipboard
 
     /// Pastes copied shapes: new ids throughout, moved by `(dx, dy)`, glue

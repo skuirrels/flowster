@@ -42,6 +42,12 @@ export interface CanvasHandle {
   viewCentre(): Pt | null;
   /** Zooms to show page bounds [x0, y0, x1, y1] (the selection). */
   zoomTo(bounds: Rect): void;
+  /**
+   * How to show the page when its next display list has a new size: fit it,
+   * or keep the shapes where they are on screen. `moved` is how far the engine
+   * moved every shape (Auto Size adding or dropping sheets on the left or bottom).
+   */
+  expectPageChange(change: { fit: boolean; moved?: Pt }): void;
 }
 
 /** The grid step that snapping uses at a zoom: the grid's minor lines. */
@@ -185,6 +191,8 @@ export function CanvasView({
   const hotArrow = useRef<Direction | null>(null);
   const hover = useRef<number | null>(null);
   const lastPage = useRef<number | null>(null);
+  const lastSize = useRef<Pt>([0, 0]);
+  const pageChange = useRef<{ fit: boolean; moved?: Pt } | null>(null);
   const sel = useRef(selection);
   sel.current = selection;
   const [dropping, setDropping] = useState(false);
@@ -471,6 +479,9 @@ export function CanvasView({
         manual.current();
         setView({ zoom, ox: inset + w / 2 - cx * zoom, oy: inset + h / 2 - (H - cy) * zoom });
       },
+      expectPageChange: (change) => {
+        pageChange.current = change;
+      },
     }),
     [fit, zoomAt, boxOf, H, inset, setView],
   );
@@ -514,10 +525,26 @@ export function CanvasView({
   }, [autoFit, inset]);
 
   // Fit when a different page arrives; just redraw when the same page updates.
+  // When the page changes size (page setup, Auto Size), fit it if asked to,
+  // or else keep the shapes still: the view is anchored at the page's top-left
+  // corner, so a taller page or shapes the engine moved would otherwise shift.
   useEffect(() => {
-    if (lastPage.current !== dl.page.index || !view.current) {
+    const [w0, h0] = lastSize.current;
+    lastSize.current = [dl.page.width, dl.page.height];
+    const change = pageChange.current;
+    pageChange.current = null;
+    const v = view.current;
+    if (lastPage.current !== dl.page.index || !v) {
       lastPage.current = dl.page.index;
       fit();
+    } else if (dl.page.width !== w0 || dl.page.height !== h0 || change?.moved) {
+      if (change?.fit) {
+        fit();
+      } else {
+        const [dx, dy] = change?.moved ?? [0, 0];
+        view.current = { ...v, ox: v.ox - dx * v.zoom, oy: v.oy - (dl.page.height - h0 - dy) * v.zoom };
+        draw();
+      }
     } else {
       draw();
     }

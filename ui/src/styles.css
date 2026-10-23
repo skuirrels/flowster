@@ -1848,6 +1848,38 @@ table {
   cursor: default;
 }
 
+/* Inspector: page setup. */
+.page-setup {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.page-setup .seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.page-setup .seg button {
+  justify-content: center;
+}
+
+.page-setup .btn {
+  justify-self: start;
+}
+
+.page-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.page-check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 /* Settings > Open with Flowster: a row of ticks per kind of file. */
 .open-with .dialog-text.small {
   font-size: 12px;

@@ -389,6 +389,25 @@ mod tests {
     }
 
     #[test]
+    fn page_setup_saves_to_the_page_sheet() {
+        let mut e = Engine::new();
+        let ev = e.handle(1, EngineRequest::New { title: None });
+        let doc = reply(&ev)["doc"].as_str().unwrap().to_owned();
+        let size = Command::SetPageSize { page: 0, width: 8.27, height: 11.69, paper: Some(9) };
+        e.handle(2, EngineRequest::Exec { doc: doc.clone(), cmd: size });
+        let ev = e.handle(3, EngineRequest::Query { doc: doc.clone(), q: Query::Pages });
+        assert_eq!((reply(&ev)[0]["paper"].clone(), reply(&ev)[0]["autoSize"].clone()), (json!(9), json!(true)));
+        let (_, bytes) = e.save(&doc).unwrap();
+        let back = flowster_vsdx::visio::read_document(&flowster_vsdx::OpcPackage::open(bytes).unwrap()).unwrap();
+        let cell = |n: &str| back.pages[0].sheet.cell(n).and_then(|c| c.v.clone());
+        assert_eq!(cell("PageWidth").as_deref(), Some("8.27"));
+        assert_eq!(cell("PageHeight").as_deref(), Some("11.69"));
+        assert_eq!(cell("PaperKind").as_deref(), Some("9"));
+        assert_eq!(cell("PrintPageOrientation").as_deref(), Some("1"));
+        assert_eq!(cell("DrawingResizeType").as_deref(), Some("1"));
+    }
+
+    #[test]
     fn a_page_exports_as_svg() {
         let mut e = Engine::new();
         let ev = e.handle(1, EngineRequest::New { title: None });

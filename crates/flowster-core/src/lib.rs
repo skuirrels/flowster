@@ -13,6 +13,7 @@ pub mod formula;
 pub mod geom;
 pub mod library;
 pub mod model;
+pub mod paper;
 pub mod protocol;
 pub mod resolve;
 pub mod rng;

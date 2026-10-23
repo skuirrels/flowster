@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import type { CellEdit, Command, DisplayList, DocInfo, ShapeBox } from "../engine/protocol";
 import { ColorPicker, fmt as cells, hex } from "./FormatBar";
 import { Icon } from "./icons";
+import { isLandscape, PAPER, paperCommand, paperOf, sizeLabel } from "./PageSetup";
 
 /** Arrowheads offered for lines and connectors (Visio arrow kinds). */
 const ARROWS: [number, string][] = [
@@ -101,6 +102,87 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+/** Orientation, size and Auto Size for the page (Visio's Design tab). */
+function PageSetup({
+  page: p,
+  hasShapes,
+  onCommand,
+}: {
+  page: DisplayList["page"];
+  hasShapes: boolean;
+  onCommand: (cmd: Command) => void;
+}) {
+  const paper = paperOf(p);
+  const landscape = isLandscape(p);
+  return (
+    <div className="page-setup">
+      <div className="seg" role="radiogroup" aria-label="Orientation">
+        {([false, true] as const).map((l) => (
+          <button
+            type="button"
+            role="radio"
+            key={String(l)}
+            aria-checked={landscape === l}
+            aria-selected={landscape === l}
+            onClick={() => landscape !== l && onCommand({ kind: "setPageOrientation", page: p.index, landscape: l })}
+          >
+            {l ? "Landscape" : "Portrait"}
+          </button>
+        ))}
+      </div>
+      <label className="field wide">
+        <span className="field-label">Size</span>
+        <span className="field-box">
+          <select
+            value={paper?.kind ?? "custom"}
+            onChange={(e) => {
+              const pick = PAPER.find((s) => s.kind === Number(e.target.value));
+              if (pick) onCommand(paperCommand(p, pick));
+            }}
+          >
+            {!paper && <option value="custom">Custom ({sizeLabel(p.width, p.height)})</option>}
+            {PAPER.map((s) => (
+              <option key={s.kind} value={s.kind}>
+                {s.name} ({landscape ? sizeLabel(s.h, s.w) : sizeLabel(s.w, s.h)})
+              </option>
+            ))}
+          </select>
+        </span>
+      </label>
+      <div className="field-grid">
+        <Num
+          label="Width"
+          value={p.width}
+          min={0.25}
+          onCommit={(v) => onCommand({ kind: "setPageSize", page: p.index, width: v, height: p.height })}
+        />
+        <Num
+          label="Height"
+          value={p.height}
+          min={0.25}
+          onCommit={(v) => onCommand({ kind: "setPageSize", page: p.index, width: p.width, height: v })}
+        />
+      </div>
+      <label className="page-check" title="The page grows and shrinks by whole sheets of paper to hold the shapes">
+        <input
+          type="checkbox"
+          checked={p.autoSize}
+          onChange={(e) => onCommand({ kind: "setPageAutoSize", page: p.index, on: e.target.checked })}
+        />
+        Auto size
+      </label>
+      <button
+        type="button"
+        className="btn small"
+        disabled={!hasShapes}
+        onClick={() => onCommand({ kind: "fitPageToDrawing", page: p.index })}
+      >
+        <Icon name="fit" size={14} /> Fit to drawing
+      </button>
+    </div>
+  );
+}
+
 function shapeFrame(b: ShapeBox) {
   const [a, bb, c, d, e, f] = b.transform;
   const pin = [a * (b.width / 2) + c * (b.height / 2) + e, bb * (b.width / 2) + d * (b.height / 2) + f];
@@ -140,13 +222,10 @@ export function Inspector({
           <dl className="insp-facts">
             <dt>Name</dt>
             <dd>{dl.page.name}</dd>
-            <dt>Size</dt>
-            <dd>
-              {fmt(dl.page.width)} × {fmt(dl.page.height)} in
-            </dd>
             <dt>Shapes</dt>
             <dd>{dl.shapes.length}</dd>
           </dl>
+          <PageSetup page={dl.page} hasShapes={dl.shapes.length > 0} onCommand={onCommand} />
         </Section>
         <p className="insp-hint">Select a shape to see and change its position, size and text.</p>
       </aside>
