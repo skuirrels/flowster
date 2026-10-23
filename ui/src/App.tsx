@@ -29,6 +29,7 @@ import type {
   SyncState,
 } from "./engine/protocol";
 import { ExportDialog, RecoveryNotice, UnsavedDialog, type ExportChoice } from "./chrome/FileDialogs";
+import { SettingsDialog } from "./chrome/Settings";
 import { pageImage, pagePng } from "./canvas/pageImage";
 import {
   canExportPdf,
@@ -39,6 +40,7 @@ import {
   pickDocument,
   saveDocument,
   setDocumentState,
+  watchOpenedDocuments,
   type PickedFile,
   type SaveHandle,
 } from "./host";
@@ -164,7 +166,7 @@ export function App({ engine }: { engine: EngineClient }) {
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   /** A shape to start editing as soon as it appears (a new text box). */
   const [pendingEdit, setPendingEdit] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<"shortcuts" | "about" | null>(null);
+  const [dialog, setDialog] = useState<"shortcuts" | "about" | "settings" | null>(null);
   const [grid, setGrid] = useState(true);
   const [rulers, setRulers] = useState(true);
   /** Refit the page when the window (or the canvas) changes size; zooming or panning turns it off. */
@@ -366,6 +368,19 @@ export function App({ engine }: { engine: EngineClient }) {
     },
     [confirmUnsaved, openFile],
   );
+
+  // Files opened from outside (Finder, Open With) replace the drawing like File > Open.
+  const openFromOutside = useRef<(file: PickedFile) => void>(() => {});
+  openFromOutside.current = (file) =>
+    void confirmUnsaved()
+      .then((proceed) => (proceed ? openFile(file) : undefined))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  useEffect(() => {
+    void watchOpenedDocuments(
+      (file) => openFromOutside.current(file),
+      (e) => setError(e instanceof Error ? e.message : String(e)),
+    ).catch(() => {});
+  }, []);
 
   // AutoRecover: a copy a couple of seconds after the last change (at least
   // every 30 s while editing goes on), kept until the drawing is saved.
@@ -765,6 +780,9 @@ export function App({ engine }: { engine: EngineClient }) {
       } else if (mod && key === "n") {
         e.preventDefault();
         void onNew();
+      } else if (mod && key === "," && inTauri) {
+        e.preventDefault();
+        setDialog("settings");
       } else if (mod && (key === "k" || key === "/") && doc) {
         // Command palette (Ctrl+K, or Figma's Ctrl+/).
         e.preventDefault();
@@ -877,6 +895,9 @@ export function App({ engine }: { engine: EngineClient }) {
           "separator",
           { label: "Export…", icon: "export", keys: "Ctrl+Shift+E", run: () => setExporting(true), disabled: !drawing },
           { label: "Print…", icon: "print", keys: "Ctrl+P", run: () => void onPrint(), disabled: !drawing },
+          ...(inTauri
+            ? ["separator" as const, { label: "Settings…", icon: "settings" as const, keys: "Ctrl+,", run: () => setDialog("settings") }]
+            : []),
         ],
       },
       {
@@ -1406,6 +1427,7 @@ export function App({ engine }: { engine: EngineClient }) {
       )}
       {dialog === "shortcuts" && <ShortcutsDialog onClose={() => setDialog(null)} />}
       {dialog === "about" && <AboutDialog onClose={() => setDialog(null)} />}
+      {dialog === "settings" && <SettingsDialog onClose={() => setDialog(null)} />}
       {unsaved && (
         <UnsavedDialog
           title={stem}

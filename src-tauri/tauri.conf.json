@@ -53,6 +53,50 @@
     ],
     "category": "Productivity",
     "shortDescription": "Diagramming",
+    "fileAssociations": [
+      {
+        "ext": ["vsdx"],
+        "name": "Visio Drawing",
+        "description": "Visio Drawing",
+        "role": "Editor",
+        "mimeType": "application/vnd.ms-visio.drawing.main+xml"
+      },
+      {
+        "ext": ["vsdm"],
+        "name": "Visio Macro-Enabled Drawing",
+        "description": "Visio Macro-Enabled Drawing",
+        "role": "Editor",
+        "mimeType": "application/vnd.ms-visio.drawing.macroEnabled.main+xml"
+      },
+      {
+        "ext": ["vssx"],
+        "name": "Visio Stencil",
+        "description": "Visio Stencil",
+        "role": "Editor",
+        "mimeType": "application/vnd.ms-visio.stencil.main+xml"
+      },
+      {
+        "ext": ["vssm"],
+        "name": "Visio Macro-Enabled Stencil",
+        "description": "Visio Macro-Enabled Stencil",
+        "role": "Editor",
+        "mimeType": "application/vnd.ms-visio.stencil.macroEnabled.main+xml"
+      },
+      {
+        "ext": ["vstx"],
+        "name": "Visio Template",
+        "description": "Visio Template",
+        "role": "Editor",
+        "mimeType": "application/vnd.ms-visio.template.main+xml"
+      },
+      {
+        "ext": ["vstm"],
+        "name": "Visio Macro-Enabled Template",
+        "description": "Visio Macro-Enabled Template",
+        "role": "Editor",
+        "mimeType": "application/vnd.ms-visio.template.macroEnabled.main+xml"
+      }
+    ],
     "createUpdaterArtifacts": true,
     "macOS": {
       "signingIdentity": "-"

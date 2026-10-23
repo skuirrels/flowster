@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Least privilege for the main window: the Flowster file-open, save and export commands, telling the host whether there are unsaved changes, and asking it to check for updates; nothing else. The updater itself stays in the host. No core:default, no fs/dialog/shell plugin access from the webview (SPEC §21, §23).",
+  "description": "Least privilege for the main window: the Flowster file-open, save and export commands, telling the host whether there are unsaved changes, asking it to check for updates, receiving files opened from outside, and Settings' default-app choice; nothing else. The updater itself stays in the host. No core:default, no fs/dialog/shell plugin access from the webview (SPEC §21, §23).",
   "windows": ["main"],
   "permissions": [
     "allow-pick-document",
@@ -9,6 +9,9 @@
     "allow-save-document",
     "allow-export-pdf",
     "allow-set-document-state",
-    "allow-check-for-updates"
+    "allow-check-for-updates",
+    "allow-watch-opened-documents",
+    "allow-file-associations",
+    "allow-make-default-app"
   ]
 }

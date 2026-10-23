@@ -22,6 +22,7 @@ export type IconName =
   | "package"
   | "drawing"
   | "keyboard"
+  | "settings"
   | "info"
   | "check"
   | "chevron"
@@ -169,6 +170,13 @@ const paths: Record<IconName, ReactNode> = {
       <rect x="3" y="3" width="8" height="7" rx="1.5" />
       <circle cx="17" cy="17" r="4" />
       <path d="M7 10v7h6" />
+    </>
+  ),
+  settings: (
+    <>
+      <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+      <circle cx="16" cy="7" r="2" />
+      <circle cx="10" cy="17" r="2" />
     </>
   ),
   keyboard: (

@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the bundle's Info.plist. macOS has no system types for Visio files, so
+  Flowster imports them here, for Macs where no other app has declared them first.
+  fileAssociations in tauri.conf.json claims the files by extension, not by these
+  types, so Flowster is offered for them whichever app's type they end up with (on a
+  Mac with LibreOffice they are org.libreoffice.visio-document). Settings > Open with
+  Flowster can then make it their default app.
+-->
+<plist version="1.0">
+<dict>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.microsoft.visio.drawing</string>
+			<key>UTTypeDescription</key>
+			<string>Visio Drawing</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.composite-content</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>vsdx</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/vnd.ms-visio.drawing.main+xml</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.microsoft.visio.drawing.macroenabled</string>
+			<key>UTTypeDescription</key>
+			<string>Visio Macro-Enabled Drawing</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.composite-content</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>vsdm</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/vnd.ms-visio.drawing.macroEnabled.main+xml</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.microsoft.visio.stencil</string>
+			<key>UTTypeDescription</key>
+			<string>Visio Stencil</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.composite-content</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>vssx</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/vnd.ms-visio.stencil.main+xml</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.microsoft.visio.stencil.macroenabled</string>
+			<key>UTTypeDescription</key>
+			<string>Visio Macro-Enabled Stencil</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.composite-content</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>vssm</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/vnd.ms-visio.stencil.macroEnabled.main+xml</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.microsoft.visio.template</string>
+			<key>UTTypeDescription</key>
+			<string>Visio Template</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.composite-content</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>vstx</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/vnd.ms-visio.template.main+xml</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.microsoft.visio.template.macroenabled</string>
+			<key>UTTypeDescription</key>
+			<string>Visio Macro-Enabled Template</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.composite-content</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>vstm</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/vnd.ms-visio.template.macroEnabled.main+xml</string>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>

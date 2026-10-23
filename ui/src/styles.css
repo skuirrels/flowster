@@ -744,8 +744,12 @@ kbd {
   background: var(--raised);
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
   background: var(--hover);
+}
+
+.btn:disabled {
+  opacity: 0.5;
 }
 
 .btn.danger-ghost {
@@ -1842,6 +1846,62 @@ table {
 .choice.disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+/* Settings > Open with Flowster: a row of ticks per kind of file. */
+.open-with .dialog-text.small {
+  font-size: 12px;
+}
+
+.assoc-groups {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0;
+}
+
+.assoc-group {
+  display: grid;
+  grid-template-columns: 120px repeat(2, max-content);
+  gap: 16px;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.assoc-group:hover {
+  background: var(--hover);
+}
+
+.assoc-tick {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.assoc-tick input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.assoc-tick:has(input:disabled) {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.assoc-tick code {
+  font-family: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.open-with-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.error-text {
+  color: var(--danger);
 }
 
 .banner.info {

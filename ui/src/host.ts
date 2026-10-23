@@ -116,6 +116,48 @@ export async function checkForUpdates(): Promise<void> {
   await invoke("check_for_updates");
 }
 
+/**
+ * Calls `onOpen` with a file the system asks Flowster to open (a double-click
+ * in Finder or Explorer, Open With), including one that arrived before the page
+ * was ready. The host only ever hands over files the user chose.
+ */
+export async function watchOpenedDocuments(onOpen: (file: PickedFile) => void, onError: (e: unknown) => void): Promise<void> {
+  if (!inTauri) return;
+  const { Channel, invoke } = await import("@tauri-apps/api/core");
+  const channel = new Channel<{ token: number; fileName: string }>();
+  channel.onmessage = (picked) =>
+    void invoke<ArrayBuffer>("read_picked_document", { token: picked.token }).then(
+      (bytes) => onOpen({ fileName: picked.fileName, bytes, handle: isVsdx(picked.fileName) ? picked.token : undefined }),
+      onError,
+    );
+  await invoke("watch_opened_documents", { onOpen: channel });
+}
+
+/** Settings > Open with Flowster: the file types Flowster opens, and whether it is their default app. */
+export interface FileAssociations {
+  /** How the default app is chosen: here (macOS), in Windows Settings, or in the file manager (Linux). */
+  platform: "macos" | "windows" | "linux";
+  /** Why Flowster can't make itself the default (a development build, an old macOS). */
+  unavailable: string | null;
+  /** `isDefault` is null where the system doesn't say. */
+  kinds: { ext: string; isDefault: boolean | null }[];
+}
+
+export async function fileAssociations(): Promise<FileAssociations> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<FileAssociations>("file_associations");
+}
+
+/**
+ * Makes Flowster the default app for these extensions (no dots). macOS asks the
+ * user to confirm each one; on Windows this opens Default apps in Settings.
+ * Returns the state afterwards.
+ */
+export async function makeDefaultApp(extensions: string[]): Promise<FileAssociations> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<FileAssociations>("make_default_app", { extensions });
+}
+
 /** Tells the host whether there are unsaved changes, so closing the window can warn. */
 export async function setDocumentState(dirty: boolean, title: string): Promise<void> {
   if (!inTauri) return;

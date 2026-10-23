@@ -29,5 +29,12 @@ flowster-render.workspace = true
 flowster-text.workspace = true
 flowster-export.workspace = true
 
+# Settings > Open with Flowster asks LaunchServices (NSWorkspace) for the default app.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSError", "NSString", "NSURL"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSWorkspace"] }
+
 [lints]
 workspace = true

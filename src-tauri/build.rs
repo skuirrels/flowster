@@ -9,6 +9,9 @@ fn main() {
         "export_pdf",
         "set_document_state",
         "check_for_updates",
+        "watch_opened_documents",
+        "file_associations",
+        "make_default_app",
     ])))
     .expect("tauri build script");
 }
