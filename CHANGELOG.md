@@ -6,6 +6,22 @@ Add each change under **Unreleased** as it lands. When you `make bump`, rename t
 
 ## Unreleased
 
+## 0.1.5 — 2026-10-23
+
+See [release-notes/0.1.5.md](release-notes/0.1.5.md) for the user-facing notes.
+
+### Added
+
+- Page setup, as on Visio's Design tab, in a new Design menu and in the Inspector when nothing is selected: portrait or landscape, standard paper sizes (Letter, Legal, Tabloid, A5, A4, A3, A2), a custom size, and Fit to Drawing.
+- Auto Size: the page stays a whole number of sheets of its paper around the shapes, growing and shrinking after each edit in the same undo step. Shapes past the left or bottom edge add sheets there, and the view pans so nothing jumps.
+- Files opened from outside Flowster (Finder, Explorer's Open With, the command line) now open in it, asking about unsaved changes first.
+- The installers register Flowster for `.vsdx`, `.vsdm`, `.vssx`, `.vssm`, `.vstx` and `.vstm` files.
+- File › Settings… (desktop app) with an Open with Flowster section: on macOS it makes Flowster the default app for the chosen file types; on Windows it opens Default apps.
+
+### Changed
+
+- New drawings start with Auto Size on, on Letter landscape paper, as Visio's do.
+
 ## 0.1.4 — 2026-10-23
 
 See [release-notes/0.1.4.md](release-notes/0.1.4.md) for the user-facing notes.
