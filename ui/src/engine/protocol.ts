@@ -56,6 +56,11 @@ export type Command =
   | { kind: "deletePage"; page: number }
   | { kind: "renamePage"; page: number; name: string }
   | { kind: "setPageHidden"; page: number; hidden: boolean }
+  /** A standard `paper` (PaperKind) keeps Auto Size; a custom size turns it off. */
+  | { kind: "setPageSize"; page: number; width: number; height: number; paper?: number }
+  | { kind: "setPageOrientation"; page: number; landscape: boolean }
+  | { kind: "fitPageToDrawing"; page: number }
+  | { kind: "setPageAutoSize"; page: number; on: boolean }
   /** Pastes shapes from the `copyShapes` query, moved by (dx, dy) inches; they get new ids. */
   | { kind: "insertShapes"; page: number; shapes: ClipShape[]; dx: number; dy: number }
   | { kind: "undo" }
@@ -243,8 +248,13 @@ export interface PageInfo {
   backPage: number | null;
   /** Hidden from the page tabs. */
   hidden: boolean;
+  /** Paper size in inches. */
   width: number;
   height: number;
+  /** The printer paper (PaperKind), if set. */
+  paper: number | null;
+  /** Design > Auto Size: the page grows and shrinks with its shapes. */
+  autoSize: boolean;
 }
 
 /** A top-level shape's frame, for selection and handles. */
@@ -346,6 +356,8 @@ export interface ChangeSummary {
   created?: [number, number];
   /** The page list changed; the page to show. */
   page?: number;
+  /** The page grew or shrank on its left or bottom edge: every shape moved by [dx, dy] inches. */
+  moved?: [number, number];
 }
 
 export type SyncState = "local" | "connecting" | "live" | "offline";

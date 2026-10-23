@@ -29,6 +29,8 @@ import type {
   SyncState,
 } from "./engine/protocol";
 import { ExportDialog, RecoveryNotice, UnsavedDialog, type ExportChoice } from "./chrome/FileDialogs";
+import { isLandscape, PAPER, paperCommand, paperOf, PageSizeDialog, sizeLabel } from "./chrome/PageSetup";
+import { SettingsDialog } from "./chrome/Settings";
 import { pageImage, pagePng } from "./canvas/pageImage";
 import {
   canExportPdf,
@@ -39,6 +41,7 @@ import {
   pickDocument,
   saveDocument,
   setDocumentState,
+  watchOpenedDocuments,
   type PickedFile,
   type SaveHandle,
 } from "./host";
@@ -164,7 +167,7 @@ export function App({ engine }: { engine: EngineClient }) {
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   /** A shape to start editing as soon as it appears (a new text box). */
   const [pendingEdit, setPendingEdit] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<"shortcuts" | "about" | null>(null);
+  const [dialog, setDialog] = useState<"shortcuts" | "about" | "settings" | "pageSize" | null>(null);
   const [grid, setGrid] = useState(true);
   const [rulers, setRulers] = useState(true);
   /** Refit the page when the window (or the canvas) changes size; zooming or panning turns it off. */
@@ -367,6 +370,19 @@ export function App({ engine }: { engine: EngineClient }) {
     [confirmUnsaved, openFile],
   );
 
+  // Files opened from outside (Finder, Open With) replace the drawing like File > Open.
+  const openFromOutside = useRef<(file: PickedFile) => void>(() => {});
+  openFromOutside.current = (file) =>
+    void confirmUnsaved()
+      .then((proceed) => (proceed ? openFile(file) : undefined))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  useEffect(() => {
+    void watchOpenedDocuments(
+      (file) => openFromOutside.current(file),
+      (e) => setError(e instanceof Error ? e.message : String(e)),
+    ).catch(() => {});
+  }, []);
+
   // AutoRecover: a copy a couple of seconds after the last change (at least
   // every 30 s while editing goes on), kept until the drawing is saved.
   const lastKept = useRef(0);
@@ -480,6 +496,10 @@ export function App({ engine }: { engine: EngineClient }) {
       if (!doc) return null;
       try {
         const changes = await engine.exec(doc.open.doc, cmd);
+        // Page setup fits the resized page (in fit mode); Auto Size growing
+        // under an edit keeps the drawing still instead.
+        const setup = ["setPageSize", "setPageOrientation", "fitPageToDrawing", "setPageAutoSize"].includes(cmd.kind);
+        canvas.current?.expectPageChange({ fit: setup && autoFit, moved: changes?.moved });
         // The page list first, so the page fetched next still exists.
         const pages = await refreshInfo(doc.open.doc);
         const next = changes?.page ?? Math.min(page, Math.max(0, pages.length - 1));
@@ -499,7 +519,7 @@ export function App({ engine }: { engine: EngineClient }) {
         return null;
       }
     },
-    [doc, engine, page, refreshInfo],
+    [doc, engine, page, refreshInfo, autoFit],
   );
 
   /** Runs a canvas command; a new text box opens for typing straight away. */
@@ -765,6 +785,9 @@ export function App({ engine }: { engine: EngineClient }) {
       } else if (mod && key === "n") {
         e.preventDefault();
         void onNew();
+      } else if (mod && key === "," && inTauri) {
+        e.preventDefault();
+        setDialog("settings");
       } else if (mod && (key === "k" || key === "/") && doc) {
         // Command palette (Ctrl+K, or Figma's Ctrl+/).
         e.preventDefault();
@@ -877,6 +900,9 @@ export function App({ engine }: { engine: EngineClient }) {
           "separator",
           { label: "Export…", icon: "export", keys: "Ctrl+Shift+E", run: () => setExporting(true), disabled: !drawing },
           { label: "Print…", icon: "print", keys: "Ctrl+P", run: () => void onPrint(), disabled: !drawing },
+          ...(inTauri
+            ? ["separator" as const, { label: "Settings…", icon: "settings" as const, keys: "Ctrl+,", run: () => setDialog("settings") }]
+            : []),
         ],
       },
       {
@@ -950,6 +976,26 @@ export function App({ engine }: { engine: EngineClient }) {
         ],
       },
       {
+        // Visio's Design tab: page orientation, size and Auto Size.
+        label: "Design",
+        items: dl
+          ? [
+              { label: "Portrait", checked: !isLandscape(dl.page), run: () => void exec({ kind: "setPageOrientation", page: dl.page.index, landscape: false }) },
+              { label: "Landscape", checked: isLandscape(dl.page), run: () => void exec({ kind: "setPageOrientation", page: dl.page.index, landscape: true }) },
+              "separator",
+              ...PAPER.map((s) => ({
+                label: `${s.name} (${isLandscape(dl.page) ? sizeLabel(s.h, s.w) : sizeLabel(s.w, s.h)})`,
+                checked: paperOf(dl.page)?.kind === s.kind,
+                run: () => void exec(paperCommand(dl.page, s)),
+              })),
+              { label: "Custom size…", icon: "ruler" as const, run: () => setDialog("pageSize") },
+              { label: "Fit to drawing", icon: "fit" as const, run: () => void exec({ kind: "fitPageToDrawing", page: dl.page.index }), disabled: dl.shapes.length === 0 },
+              "separator",
+              { label: "Auto size", checked: dl.page.autoSize, run: () => void exec({ kind: "setPageAutoSize", page: dl.page.index, on: !dl.page.autoSize }) },
+            ]
+          : [{ label: "Open a drawing to set up its page", run: () => {}, disabled: true }],
+      },
+      {
         label: "Arrange",
         items: [...alignItems, "separator", ...positionItems, "separator", ...frontItems, ...backItems, "separator", ...groupItems],
       },
@@ -965,7 +1011,7 @@ export function App({ engine }: { engine: EngineClient }) {
         ],
       },
     ],
-    [busy, deleteSelection, doc, drawing, editText, exec, inspector, shapesPanel, mode, onNew, onOpen, onSave, selectAll, selection, stepZoom, undo,
+    [busy, deleteSelection, doc, dl, drawing, editText, exec, inspector, shapesPanel, mode, onNew, onOpen, onSave, selectAll, selection, stepZoom, undo,
       autoFit, rulers, grid, alignItems, positionItems, frontItems, backItems, groupItems,
       onCut, onCopy, onPaste, duplicate, pasteStyle, selectedFormat, styleClip, hasClip, zoomToSelection, snapGrid, smartGuides, minimap, onSaveAs, onPrint],
   );
@@ -1406,6 +1452,8 @@ export function App({ engine }: { engine: EngineClient }) {
       )}
       {dialog === "shortcuts" && <ShortcutsDialog onClose={() => setDialog(null)} />}
       {dialog === "about" && <AboutDialog onClose={() => setDialog(null)} />}
+      {dialog === "settings" && <SettingsDialog onClose={() => setDialog(null)} />}
+      {dialog === "pageSize" && dl && <PageSizeDialog page={dl.page} onApply={(c) => void exec(c)} onClose={() => setDialog(null)} />}
       {unsaved && (
         <UnsavedDialog
           title={stem}

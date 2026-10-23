@@ -1262,10 +1262,14 @@ dependencies = [
 name = "flowster-app"
 version = "0.1.4"
 dependencies = [
+ "block2",
  "flowster-export",
  "flowster-render",
  "flowster-text",
  "flowster-vsdx",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "tauri",

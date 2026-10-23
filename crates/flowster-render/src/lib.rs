@@ -41,6 +41,10 @@ pub struct PageInfo {
     /// Paper size in inches.
     pub width: f64,
     pub height: f64,
+    /// The printer paper (`PaperKind`, see `flowster_core::paper`), if set.
+    pub paper: Option<u32>,
+    /// Design > Auto Size: the page grows and shrinks with its shapes.
+    pub auto_size: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -262,6 +266,8 @@ pub fn page_info(doc: &Document, index: usize) -> Option<PageInfo> {
         hidden: p.hidden(),
         width: num("PageWidth").unwrap_or(8.5),
         height: num("PageHeight").unwrap_or(11.0),
+        paper: num("PaperKind").map(|k| k as u32),
+        auto_size: num("DrawingResizeType") == Some(1.0),
     })
 }
 

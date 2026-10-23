@@ -20,6 +20,13 @@
 //! made here (`export_pdf`) from the document's `.vsdx` bytes, because laying
 //! out its text needs the system fonts, which the WASM engine cannot reach.
 //!
+//! Files opened from outside (Finder, Explorer's Open With, a double-click)
+//! reach the page the same way as a picked file: the host turns each path into
+//! a one-time token and sends it down the channel the page registered with
+//! `watch_opened_documents`. Files that arrive before the page is ready wait.
+//! Settings can make Flowster the default app for its file types
+//! (`file_associations`, `make_default_app`; see `associations`).
+//!
 //! The page reports whether there are unsaved changes (`set_document_state`),
 //! so closing the window can warn before they are lost.
 //!
@@ -29,13 +36,15 @@
 
 #![forbid(unsafe_code)]
 
+mod associations;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use serde::Serialize;
-use tauri::ipc::Response;
+use tauri::ipc::{Channel, Response};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_updater::UpdaterExt;
@@ -51,6 +60,75 @@ struct PickedFiles {
     paths: Mutex<HashMap<u64, PathBuf>>,
     /// `.vsdx` files the user opened or saved, by handle: File > Save writes back to them.
     documents: Mutex<HashMap<u64, PathBuf>>,
+}
+
+impl PickedFiles {
+    /// A one-time token for reading `path` (`read_picked_document`).
+    fn offer(&self, path: PathBuf) -> Result<PickedDocument, String> {
+        let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let token = self.next.fetch_add(1, Ordering::Relaxed) + 1;
+        self.paths.lock().map_err(|e| e.to_string())?.insert(token, path);
+        Ok(PickedDocument { token, file_name })
+    }
+}
+
+/// A file the system asked Flowster to open, and where to send it.
+#[derive(Default)]
+struct OpenedFiles {
+    /// Arrived before the page was listening.
+    waiting: Mutex<Option<PathBuf>>,
+    page: Mutex<Option<Channel<PickedDocument>>>,
+}
+
+/// Hands a file opened from outside to the page, or keeps it until the page
+/// listens. Flowster shows one drawing at a time, so of several it takes the first.
+fn deliver_opened(app: &AppHandle, paths: Vec<PathBuf>) {
+    let Some(path) = paths.into_iter().find(|p| p.is_file()) else { return };
+    let opened = app.state::<OpenedFiles>();
+    let Ok(page) = opened.page.lock() else { return };
+    match page.as_ref() {
+        Some(channel) => {
+            if let Ok(doc) = app.state::<PickedFiles>().offer(path) {
+                let _ = channel.send(doc);
+            }
+        }
+        None => {
+            if let Ok(mut waiting) = opened.waiting.lock() {
+                *waiting = Some(path);
+            }
+        }
+    }
+}
+
+/// The page listens for files opened from outside; one that came first is sent now.
+#[tauri::command]
+fn watch_opened_documents(
+    app: AppHandle,
+    on_open: Channel<PickedDocument>,
+    opened: State<'_, OpenedFiles>,
+) -> Result<(), String> {
+    *opened.page.lock().map_err(|e| e.to_string())? = Some(on_open);
+    let waiting = opened.waiting.lock().map_err(|e| e.to_string())?.take();
+    deliver_opened(&app, waiting.into_iter().collect());
+    Ok(())
+}
+
+/// Settings: the file types Flowster opens and whether it is their default app.
+#[tauri::command]
+async fn file_associations() -> Result<associations::Associations, String> {
+    tauri::async_runtime::spawn_blocking(associations::current).await.map_err(|e| e.to_string())
+}
+
+/// Settings: makes Flowster the default app for these extensions (macOS asks to
+/// confirm each), or opens the system's Default apps (Windows).
+#[tauri::command]
+async fn make_default_app(extensions: Vec<String>) -> Result<associations::Associations, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let made = associations::make_default(&extensions);
+        made.map(|()| associations::current())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// What the page last said about its document, for the close warning.
@@ -120,11 +198,7 @@ async fn pick_document(app: AppHandle, picked: State<'_, PickedFiles>) -> Result
     .map_err(|e| e.to_string())?;
 
     let Some(choice) = choice else { return Ok(None) };
-    let path = choice.into_path().map_err(|e| e.to_string())?;
-    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let token = picked.next.fetch_add(1, Ordering::Relaxed) + 1;
-    picked.paths.lock().map_err(|e| e.to_string())?.insert(token, path);
-    Ok(Some(PickedDocument { token, file_name }))
+    picked.offer(choice.into_path().map_err(|e| e.to_string())?).map(Some)
 }
 
 #[derive(Serialize)]
@@ -344,13 +418,27 @@ fn check_for_updates(app: AppHandle) {
     tauri::async_runtime::spawn(check_for_update(app, true));
 }
 
+/// Documents named on the command line: how Windows and Linux open a file with Flowster.
+fn documents_in_args() -> Vec<PathBuf> {
+    std::env::args_os()
+        .skip(1)
+        .map(PathBuf::from)
+        .filter(|p| p.extension().is_some_and(|e| DOCUMENT_EXTENSIONS.iter().any(|d| e.eq_ignore_ascii_case(d))))
+        .collect()
+}
+
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Managed before start-up: macOS can hand over a file before `setup` runs.
+        .manage(PickedFiles::default())
+        .manage(OpenedFiles::default())
         .setup(|app| {
-            app.manage(PickedFiles::default());
             app.manage(DocumentState::default());
+            if !cfg!(target_os = "macos") {
+                deliver_opened(app.handle(), documents_in_args());
+            }
             if !cfg!(debug_assertions) {
                 tauri::async_runtime::spawn(check_for_update(app.handle().clone(), false));
             }
@@ -388,10 +476,20 @@ pub fn run() {
             save_document,
             export_pdf,
             set_document_state,
-            check_for_updates
+            check_for_updates,
+            watch_opened_documents,
+            file_associations,
+            make_default_app
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Flowster");
+        .build(tauri::generate_context!())
+        .expect("error while starting Flowster");
+    app.run(|_app, _event| {
+        // macOS opens files with an Apple event rather than arguments, at start-up or later.
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Opened { urls } = _event {
+            deliver_opened(_app, urls.into_iter().filter_map(|u| u.to_file_path().ok()).collect());
+        }
+    });
 }
 
 #[cfg(test)]

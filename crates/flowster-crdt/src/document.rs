@@ -205,6 +205,10 @@ impl CommandTarget for Document {
             | Command::DeletePage { .. }
             | Command::RenamePage { .. }
             | Command::SetPageHidden { .. }
+            | Command::SetPageSize { .. }
+            | Command::SetPageOrientation { .. }
+            | Command::FitPageToDrawing { .. }
+            | Command::SetPageAutoSize { .. }
             | Command::InsertShapes { .. } => {
                 let mut ed = crate::edit::Editor { doc: &self.doc, next: &mut self.next_uuid };
                 changes = match cmd {
@@ -233,9 +237,22 @@ impl CommandTarget for Document {
                     Command::DeletePage { page } => ed.delete_page(*page),
                     Command::RenamePage { page, name } => ed.rename_page(*page, name),
                     Command::SetPageHidden { page, hidden } => ed.set_page_hidden(*page, *hidden),
+                    Command::SetPageSize { page, width, height, paper } => {
+                        ed.set_page_size(*page, *width, *height, *paper)
+                    }
+                    Command::SetPageOrientation { page, landscape } => ed.set_page_orientation(*page, *landscape),
+                    Command::FitPageToDrawing { page } => ed.fit_page_to_drawing(*page),
+                    Command::SetPageAutoSize { page, on } => ed.set_page_auto_size(*page, *on),
                     Command::InsertShapes { page, shapes, dx, dy } => ed.insert_shapes(*page, shapes, *dx, *dy),
                     _ => unreachable!(),
                 }?;
+                // Auto Size, in the same undo step as the edit that needed it.
+                if let Some(page) = sized_page(cmd)
+                    && let Some((dx, dy)) = ed.auto_size(page)?
+                {
+                    let (x, y) = changes.moved.unwrap_or_default();
+                    changes.moved = Some((x + dx, y + dy));
+                }
                 self.doc.commit();
                 self.undo_labels.push(cmd.label().to_owned());
                 self.redo_labels.clear();
@@ -266,6 +283,31 @@ impl CommandTarget for Document {
             can_redo: self.undo.as_ref().is_some_and(UndoManager::can_redo),
             labels: self.undo_labels.iter().rev().cloned().collect(),
         }
+    }
+}
+
+/// The page whose size an edit may change under Auto Size.
+fn sized_page(cmd: &Command) -> Option<usize> {
+    match cmd {
+        Command::AddShape { page, .. }
+        | Command::MoveShapes { page, .. }
+        | Command::SetBounds { page, .. }
+        | Command::SetEndpoints { page, .. }
+        | Command::AddConnector { page, .. }
+        | Command::AutoConnect { page, .. }
+        | Command::DeleteShapes { page, .. }
+        | Command::SetText { page, .. }
+        | Command::SetCells { page, .. }
+        | Command::AlignShapes { page, .. }
+        | Command::DistributeShapes { page, .. }
+        | Command::RotateShapes { page, .. }
+        | Command::FlipShapes { page, .. }
+        | Command::UngroupShapes { page, .. }
+        | Command::InsertShapes { page, .. }
+        | Command::SetPageSize { page, .. }
+        | Command::SetPageOrientation { page, .. }
+        | Command::SetPageAutoSize { page, .. } => Some(*page),
+        _ => None,
     }
 }
 
@@ -374,6 +416,8 @@ mod tests {
     #[test]
     fn connectors_glue_follow_moves_and_autoconnect() {
         let mut d = Document::new_drawing("Flow");
+        // Positions below are page positions; Auto Size would move them as the page grows.
+        d.exec(&Command::SetPageAutoSize { page: 0, on: false }).unwrap();
         let add = |d: &mut Document, x: f64| {
             let cmd = Command::AddShape { page: 0, shape: "process".into(), x, y: 1.0, w: 1.0, h: 1.0 };
             d.exec(&cmd).unwrap().created.unwrap().1
@@ -424,6 +468,70 @@ mod tests {
         assert_eq!(order.len(), 5, "a frame and three lanes, then the step");
         assert_eq!(order[0], pool);
         assert_eq!(*order.last().unwrap(), step);
+    }
+
+    #[test]
+    fn page_size_fit_to_drawing_and_auto_size() {
+        let mut d = Document::new_drawing("Size");
+        let num = |d: &Document, n: &str| -> f64 {
+            let m = d.read_model(|_| None);
+            m.pages[0].sheet.cell(n).and_then(|c| c.v.as_deref()).and_then(flowster_core::value::parse_num).unwrap()
+        };
+        let size = |d: &Document| (num(d, "PageWidth"), num(d, "PageHeight"));
+        let rect = |x: f64| Command::AddShape { page: 0, shape: "rectangle".into(), x, y: 1.0, w: 2.0, h: 1.0 };
+        assert_eq!(num(&d, "DrawingResizeType"), 1.0, "new drawings auto size, as in Visio");
+
+        // Past the right edge: a second sheet of Letter, landscape.
+        let right = d.exec(&rect(10.0)).unwrap().created.unwrap().1;
+        assert_eq!(size(&d), (22.0, 8.5));
+        // Wholly past the left edge: a sheet on the left, everything moves onto
+        // it, and the origin's sheet stays though nothing is on it.
+        let lone = d.exec(&rect(-3.0)).unwrap().created.unwrap().1;
+        assert_eq!(size(&d), (33.0, 8.5));
+        d.exec(&Command::Undo).unwrap();
+        assert_eq!(size(&d), (22.0, 8.5));
+        assert!(d.read_model(|_| None).pages[0].shapes.iter().all(|s| s.id != lone));
+        // Past the left edge: a sheet on the left, and everything moves onto it.
+        let left = d.exec(&rect(-1.0)).unwrap();
+        assert_eq!(left.moved, Some((11.0, 0.0)));
+        assert_eq!(size(&d), (33.0, 8.5));
+        // Removing the far shape drops the sheets it needed.
+        d.exec(&Command::DeleteShapes { page: 0, shapes: vec![right] }).unwrap();
+        assert_eq!(size(&d), (22.0, 8.5), "the shape left at x 10..12 still needs two sheets");
+        d.exec(&Command::Undo).unwrap();
+        assert_eq!(size(&d), (33.0, 8.5), "undo restores the page with the shape");
+
+        // Portrait: the Letter sheets turn too, so x 10..23 takes three 8.5-inch ones.
+        d.exec(&Command::SetPageOrientation { page: 0, landscape: true }).unwrap();
+        assert_eq!(size(&d), (33.0, 8.5), "already landscape");
+        let portrait = d.exec(&Command::SetPageOrientation { page: 0, landscape: false }).unwrap();
+        assert_eq!((size(&d), num(&d, "PrintPageOrientation")), ((25.5, 11.0), 1.0));
+        assert_eq!(portrait.moved, None, "the first sheet stays even when it is empty");
+
+        // A custom size turns Auto Size off, so the page keeps it.
+        d.exec(&Command::SetPageSize { page: 0, width: 30.0, height: 9.0, paper: None }).unwrap();
+        assert_eq!((size(&d), num(&d, "DrawingResizeType")), ((30.0, 9.0), 2.0));
+        d.exec(&Command::SetPageSize { page: 0, width: 8.27, height: 11.69, paper: Some(9) }).unwrap();
+        assert_eq!(size(&d), (8.27, 11.69), "with Auto Size off the page keeps the size asked for");
+        assert_eq!((num(&d, "PaperKind"), num(&d, "PrintPageOrientation")), (9.0, 1.0));
+        assert!(d.exec(&Command::SetPageSize { page: 0, width: 0.0, height: 11.0, paper: None }).is_err());
+        assert!(d.exec(&Command::SetPageSize { page: 0, width: 8.0, height: 11.0, paper: Some(999) }).is_err());
+
+        // Auto Size back on: x 10..23 takes three sheets of A4 portrait.
+        let on = d.exec(&Command::SetPageAutoSize { page: 0, on: true }).unwrap();
+        let (w, h) = size(&d);
+        assert!((w - 3.0 * 8.27).abs() < 1e-9 && h == 11.69, "{w} × {h}");
+        assert_eq!(on.moved, None);
+
+        let fit = d.exec(&Command::FitPageToDrawing { page: 0 }).unwrap();
+        let (w, h) = size(&d);
+        assert!(
+            (w - 13.5).abs() < 1e-9 && (h - 1.5).abs() < 1e-9,
+            "the shapes plus a quarter inch each side: {w} × {h}"
+        );
+        assert_eq!(fit.moved, Some((0.25 - 10.0, 0.25 - 1.0)));
+        assert_eq!(num(&d, "DrawingResizeType"), 2.0, "fitting turns Auto Size off");
+        assert_eq!(num(&d, "PrintPageOrientation"), 2.0);
     }
 
     #[test]

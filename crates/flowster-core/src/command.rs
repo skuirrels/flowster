@@ -172,6 +172,38 @@ pub enum Command {
         page: usize,
         hidden: bool,
     },
+    /// Sets a page's paper size in inches (Design > Size). `paper` names a
+    /// standard size by its `PaperKind` (see `crate::paper`). A custom size
+    /// leaves the printer paper as it was and turns Auto Size off, so the page
+    /// keeps it. Orientation follows the size.
+    #[serde(rename_all = "camelCase")]
+    SetPageSize {
+        page: usize,
+        width: f64,
+        height: f64,
+        #[serde(default)]
+        paper: Option<u32>,
+    },
+    /// Turns a page to portrait or landscape (Design > Orientation): width and
+    /// height swap if they need to, and the printer paper turns with them.
+    #[serde(rename_all = "camelCase")]
+    SetPageOrientation {
+        page: usize,
+        landscape: bool,
+    },
+    /// Fits the page to its shapes with a small margin, moving them in by it
+    /// (Design > Size > Fit to Drawing). Turns Auto Size off.
+    #[serde(rename_all = "camelCase")]
+    FitPageToDrawing {
+        page: usize,
+    },
+    /// Design > Auto Size (`DrawingResizeType`): the page grows and shrinks by
+    /// whole sheets of its paper to hold its shapes after every edit.
+    #[serde(rename_all = "camelCase")]
+    SetPageAutoSize {
+        page: usize,
+        on: bool,
+    },
     /// Pastes shapes (from the `copyShapes` query) onto a page, moved by
     /// `(dx, dy)` inches. They get new ids; glue between pasted shapes is kept,
     /// glue to anything else comes undone.
@@ -236,6 +268,10 @@ impl Command {
             Command::RenamePage { .. } => "Rename Page",
             Command::SetPageHidden { hidden: true, .. } => "Hide Page",
             Command::SetPageHidden { .. } => "Unhide Page",
+            Command::SetPageSize { .. } => "Page Size",
+            Command::SetPageOrientation { .. } => "Page Orientation",
+            Command::FitPageToDrawing { .. } => "Fit to Drawing",
+            Command::SetPageAutoSize { .. } => "Auto Size",
             Command::Undo => "Undo",
             Command::Redo => "Redo",
         }
@@ -258,6 +294,10 @@ pub struct ChangeSummary {
     /// The page list changed; the page to show next.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub page: Option<usize>,
+    /// The page grew or shrank on its left or bottom edge, so every shape
+    /// moved by `(dx, dy)` paper inches. A view pans the same way to keep them still.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub moved: Option<(f64, f64)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
