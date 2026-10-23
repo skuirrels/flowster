@@ -6,6 +6,18 @@ Add each change under **Unreleased** as it lands. When you `make bump`, rename t
 
 ## Unreleased
 
+## 0.1.6 — 2026-10-23
+
+See [release-notes/0.1.6.md](release-notes/0.1.6.md) for the user-facing notes.
+
+### Changed
+
+- Help › Keyboard shortcuts opens a wide dialog with the shortcuts in three columns (fewer on a narrow window), so the list fits without scrolling.
+
+### Fixed
+
+- A new or opened drawing now opens fitted to the window. It used to keep the previous drawing's zoom and scroll, because the canvas only refitted when the page index changed, and every drawing starts on page 1.
+
 ## 0.1.5 — 2026-10-23
 
 See [release-notes/0.1.5.md](release-notes/0.1.5.md) for the user-facing notes.

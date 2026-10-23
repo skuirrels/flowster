@@ -1260,7 +1260,7 @@ dependencies = [
 
 [[package]]
 name = "flowster-app"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "block2",
  "flowster-export",
@@ -1280,7 +1280,7 @@ dependencies = [
 
 [[package]]
 name = "flowster-cli"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -1296,7 +1296,7 @@ dependencies = [
 
 [[package]]
 name = "flowster-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "libm",
  "serde",
@@ -1305,7 +1305,7 @@ dependencies = [
 
 [[package]]
 name = "flowster-crdt"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "flowster-core",
  "flowster-render",
@@ -1319,7 +1319,7 @@ dependencies = [
 
 [[package]]
 name = "flowster-export"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64 0.22.1",
  "flowster-core",
@@ -1334,7 +1334,7 @@ dependencies = [
 
 [[package]]
 name = "flowster-render"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64 0.22.1",
  "flowster-core",
@@ -1346,14 +1346,14 @@ dependencies = [
 
 [[package]]
 name = "flowster-sync-proto"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "flowster-text"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "flowster-core",
  "flowster-render",
@@ -1364,7 +1364,7 @@ dependencies = [
 
 [[package]]
 name = "flowster-vsdx"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "flate2",
  "flowster-core",
@@ -1377,7 +1377,7 @@ dependencies = [
 
 [[package]]
 name = "flowster-wasm"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "console_error_panic_hook",
  "dlmalloc",
